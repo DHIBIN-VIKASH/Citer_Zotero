@@ -1,0 +1,458 @@
+Task Specification: Develop ZotPrep v5 – An Intelligent Biomedical Reference Resolution & Zotero Automation Platform
+Objective
+
+Redesign the existing monolithic zotprep.py into a modular, production-quality application that automatically resolves manuscript references with >99% accuracy, creates Zotero items, and produces a Word document ready for Zotero ODF Scan. The system is optimized specifically for biomedical literature (systematic reviews, meta-analyses, clinical manuscripts).
+
+The guiding philosophy is:
+
+Find the correct paper first, then retrieve metadata.
+
+Do not rely on CrossRef bibliographic search as the primary search mechanism.
+
+Current Problems
+
+The current implementation suffers from several architectural limitations:
+
+Relies primarily on CrossRef bibliographic search.
+Searches using the entire reference instead of the extracted title.
+Performs poorly on:
+GBD Collaborator papers
+consortium publications
+WHO reports
+books
+editorials
+review articles
+Limited candidate scoring.
+No persistent cache.
+Monolithic codebase.
+Manual intervention is still required for many references.
+
+The redesign should eliminate these weaknesses.
+
+Overall Workflow
+Input DOCX
+        │
+        ▼
+Extract bibliography
+        │
+        ▼
+Parse references
+        │
+        ▼
+Extract DOI / PMID / PMCID
+        │
+        ├────────► Direct resolution
+        │
+        ▼
+Extract clean title
+        │
+        ▼
+Hybrid search
+        │
+        ▼
+Collect candidate papers
+        │
+        ▼
+Confidence scoring
+        │
+        ▼
+Select best match
+        │
+        ▼
+Verify metadata
+        │
+        ▼
+Create Zotero items
+        │
+        ▼
+Generate processed DOCX
+        │
+        ▼
+Generate unresolved reference report
+Search Strategy
+
+The search pipeline should prioritize deterministic identifiers before free-text searching.
+
+Priority 1
+
+If reference contains:
+
+DOI
+PMID
+PMCID
+
+Resolve immediately.
+
+No search should occur.
+
+Priority 2
+
+If no identifier exists:
+
+Extract the paper title.
+
+Search only using the title.
+
+Do not search the entire reference string.
+
+Hybrid Search Layer
+
+Run multiple search providers in parallel.
+
+Supported providers:
+
+Google Search (primary discovery engine)
+PubMed
+CrossRef
+OpenAlex
+Semantic Scholar
+
+Each provider independently returns candidate papers.
+
+Candidate Aggregation
+
+Merge all candidates into one pool.
+
+Deduplicate identical papers.
+
+Normalize metadata.
+
+Confidence Engine
+
+Every candidate receives a weighted confidence score.
+
+Scoring signals include:
+
+Exact DOI
+PMID
+PMCID
+Exact title match
+Fuzzy title similarity
+First author
+Collaborator name (e.g. GBD)
+Publication year
+Journal
+Volume
+Issue
+Pages
+Publisher
+Citation agreement across multiple providers
+
+Example:
+
+Google:
+
+✓ DOI A
+
+PubMed:
+
+✓ DOI A
+
+OpenAlex:
+
+✓ DOI A
+
+CrossRef:
+
+✓ DOI A
+
+Confidence:
+
+99.99%
+
+Automatically accept.
+
+Verification
+
+Before creating a Zotero item:
+
+Verify:
+
+title
+authors
+year
+journal
+DOI
+volume
+issue
+pages
+
+Reject suspicious matches.
+
+Persistent Cache
+
+Implement SQLite cache.
+
+Suggested schema:
+
+Reference
+
+Normalized Title
+
+DOI
+
+PMID
+
+PMCID
+
+Metadata
+
+Search Provider
+
+Confidence
+
+Zotero Item Key
+
+Date Resolved
+
+Last Verified
+
+Behavior:
+
+If paper already exists in cache:
+
+Skip all searches.
+
+Return immediately.
+
+Learning System
+
+When user manually fixes a reference:
+
+Store correction.
+
+Future occurrences of the same malformed reference should resolve automatically.
+
+Parallel Processing
+
+Search references concurrently.
+
+Configurable worker count:
+
+Default:
+
+16 workers
+
+This dramatically reduces runtime.
+
+Duplicate Detection
+
+Before creating Zotero items:
+
+Check whether:
+
+DOI already exists
+PMID already exists
+identical title already exists
+
+If yes:
+
+Reuse existing Zotero item.
+
+Do not create duplicates.
+
+Title Extraction
+
+Develop a robust parser capable of extracting titles from:
+
+Vancouver
+APA
+AMA
+Mixed citation styles
+Poorly formatted references
+
+Example:
+
+GBD Collaborators.
+Global incidence of...
+Lancet.
+2024.
+
+Extract only:
+
+Global incidence of...
+Modular Architecture
+zotprep/
+
+app.py
+
+gui.py
+
+parser.py
+
+extractor.py
+
+resolver.py
+
+scorer.py
+
+verifier.py
+
+cache.py
+
+report.py
+
+settings.py
+
+utils.py
+
+search/
+
+    google.py
+
+    pubmed.py
+
+    crossref.py
+
+    openalex.py
+
+    semanticscholar.py
+
+zotero/
+
+    client.py
+
+    duplicate.py
+
+database/
+
+    cache.sqlite
+
+No monolithic scripts.
+
+GUI Requirements
+
+Modern desktop GUI (PySide6).
+
+Features:
+
+Drag-and-drop DOCX
+Select bibliography
+Progress bar
+Live logging
+Worker count
+Confidence threshold
+Cache toggle
+Preview panel
+Manual review panel
+Settings dialog
+
+Example workflow:
+
+Choose DOCX
+
+✓ Cache enabled
+
+✓ Parallel search
+
+Workers: 16
+
+Confidence: 95%
+
+RUN
+
+Progress:
+
+35 references
+
+33 resolved
+
+2 manual review
+
+Done
+Manual Review Window
+
+For ambiguous references:
+
+Display:
+
+candidate title
+authors
+journal
+year
+DOI
+source
+confidence
+
+Allow:
+
+Accept
+
+Reject
+
+Search again
+
+Output
+
+Generate:
+
+1.
+
+Processed DOCX
+
+Ready for Zotero ODF Scan.
+
+2.
+
+Resolution report
+
+For every reference:
+
+original reference
+resolved title
+DOI
+PMID
+search provider
+confidence
+status
+3.
+
+Manual review report
+
+Only unresolved references.
+
+Include reason:
+
+Example:
+
+Reference 17
+
+Google and PubMed disagree on publication year.
+Future Features (Design Extensibility)
+
+The architecture should support future modules without requiring redesign.
+
+Planned capabilities include:
+
+Automatic PDF download
+PMID retrieval
+Citation count
+Journal Impact Factor
+Open Access detection
+Retraction detection
+Duplicate bibliography repair
+Vancouver ↔ APA ↔ AMA conversion
+AI-assisted malformed reference repair
+Automatic DOI insertion
+Bibliography validation prior to journal submission
+Full manuscript citation audit
+Recommended Technology Stack
+Python 3.12+
+PySide6
+SQLite
+httpx
+asyncio
+RapidFuzz
+python-docx
+PyZotero
+BeautifulSoup (for parsing retrieved pages where appropriate)
+Success Criteria
+
+The completed application should:
+
+Resolve biomedical references with >99% accuracy.
+Minimize manual intervention.
+Automatically create or reuse Zotero items.
+Produce a DOCX ready for Zotero ODF Scan.
+Be modular, extensible, and maintainable.
+Scale efficiently to large bibliographies through parallel processing and persistent caching.

@@ -1,0 +1,49 @@
+# --- manuscripts and anything derived from them -------------------------------
+# Unpublished research must never enter version control on a public remote.
+# Keep source manuscripts outside the repo, or under a directory ignored here.
+*.docx
+*.doc
+*.rtf
+*.odt
+*.pdf
+manuscripts/
+manuscript_done
+
+# Run outputs contain the full bibliography and Zotero item keys
+zot_out/
+zot_out_*/
+report*.csv
+doi_list.txt
+
+# --- local state --------------------------------------------------------------
+database/
+*.sqlite
+*.sqlite3
+
+# --- credentials --------------------------------------------------------------
+.env
+.env.*
+*.key
+zotero_credentials*
+
+# --- python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# --- test scratch -------------------------------------------------------------
+tests/r3.*
+tests/r4.*
+tests/run_35_out.json
+tests/converted_cites.json
+tests/verify_out.json
+
+# --- editors / OS -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
