@@ -279,6 +279,10 @@ dialog::backdrop{background:rgba(35,32,28,.42)}
 .guide .callout b{color:var(--ink);font-weight:400}
 .guide .warnout{border-left-color:var(--terra);background:var(--terra-soft)}
 .guide p{font-size:.95rem;color:var(--ink-2);margin:.7rem 0}
+.getxpi{margin:1.1rem 0 .6rem}
+.dl.xpi{display:inline-flex}
+.prov{font-size:.83rem!important;color:var(--faint)!important;font-style:italic;
+  line-height:1.6;margin:0 0 1.2rem!important}
 .dlg-foot{padding:1rem 1.5rem;border-top:1px solid var(--rule);display:flex;justify-content:flex-end;
   position:sticky;bottom:0;background:var(--card)}
 
@@ -478,14 +482,23 @@ footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
         marker — text like <code>{ | Marmot, (2005) | | |zu:1234567:ABCD1234}</code>. The ODF Scan
         plugin is what turns those markers into real, live Zotero citations.</p>
       <p>You only install it once. It needs <b>Zotero 7 or newer</b>.</p>
+      <p class="getxpi">
+        <a class="dl xpi" href="./vendor/zotero-odf-scan-v3.2.1.xpi"
+           download="zotero-odf-scan-v3.2.1.xpi">
+          <span class="ic">↓</span>
+          <span><span class="t">ODF Scan for Zotero 3.2.1</span><br>
+          <span class="s">.xpi · 49 KB · saves to your computer</span></span>
+        </a>
+      </p>
+      <p class="prov">A verbatim copy of the plugin by Sebastian Karcher and Frank Bennett,
+        <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-or-later</a>,
+        source at <a href="https://github.com/Juris-M/zotero-odf-scan-plugin" target="_blank" rel="noopener noreferrer">Juris-M/zotero-odf-scan-plugin</a>.
+        Newer versions appear on its <a href="https://github.com/Juris-M/zotero-odf-scan-plugin/releases" target="_blank" rel="noopener noreferrer">releases page</a>.</p>
       <ol>
-        <li>Download the plugin file from the
-          <a href="https://github.com/Juris-M/zotero-odf-scan-plugin/releases" target="_blank" rel="noopener noreferrer">ODF Scan releases page</a>.
-          You want the file ending in <code>.xpi</code>, for example
-          <code>zotero-odf-scan-v3.2.1.xpi</code>.</li>
-        <li><b>Right-click the link and choose “Save link as…”.</b> If you left-click it, your
-          browser may try to install it as a browser extension and report that it's corrupted —
-          it isn't, it just isn't a browser add-on. Save it to your Downloads folder.</li>
+        <li>Click the button above to save <code>zotero-odf-scan-v3.2.1.xpi</code>, most likely
+          into your Downloads folder. If your browser instead offers to <em>install</em> it and
+          then calls it corrupted, it has mistaken it for a browser extension — right-click the
+          button and choose <b>Save link as…</b> instead.</li>
         <li>Open Zotero on your computer.</li>
         <li>Go to <b>Tools → Plugins</b>. (On older versions this menu is called Add-ons.)</li>
         <li>Click the <b>gear icon ⚙</b> at the top right of the Plugins window, then choose

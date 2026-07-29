@@ -61,7 +61,11 @@ jobs:
           mkdir -p _site
           cp web/index.html web/app.js _site/
           cp -r web/src _site/
+          cp -r web/vendor _site/
           touch _site/.nojekyll
+          # The help panel offers this for download; if it is missing the link
+          # 404s and the ODF Scan instructions dead-end.
+          test -f _site/vendor/zotero-odf-scan-v3.2.1.xpi
 
       - name: Upload the Pages artifact
         uses: actions/upload-pages-artifact@v3
