@@ -1,8 +1,11 @@
 """Command line entry point.
 
     python -m zotprep --manuscript yourpaper.docx --dry-run
-    python -m zotprep --manuscript yourpaper.docx --live \
-        --zotero-userid 1234567 --zotero-key XXXX
+
+    # once, to stop re-entering credentials on every run:
+    python -m zotprep --zotero-userid 1234567 --zotero-key XXXX --save-credentials
+
+    python -m zotprep --manuscript yourpaper.docx --live
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ import sys
 
 import httpx
 
+from . import config
 from .cache import Cache
 from .docx_writer import (
     find_biblio_index,
@@ -29,23 +33,31 @@ from .zotero.client import ZoteroWriter, enrich, to_item
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="zotprep", description="Resolve manuscript references and prepare a Zotero-linked .docx")
-    ap.add_argument("--manuscript", required=True, help=".docx containing the manuscript")
+    ap.add_argument("--manuscript", help=".docx containing the manuscript")
     ap.add_argument("--bibliography", help="separate bibliography file; else auto-split on 'References'")
     ap.add_argument("--outdir", default="zot_out")
-    ap.add_argument("--mailto", default=os.environ.get("ZOTPREP_MAILTO", "you@example.com"),
-                    help="contact email for the Crossref/NCBI polite pools")
+    ap.add_argument("--mailto", help="contact email for the Crossref/NCBI polite pools")
     ap.add_argument("--workers", type=int, default=12)
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--dry-run", action="store_true",
                     help="resolve and report, but create nothing in Zotero")
     ap.add_argument("--live", action="store_true",
                     help="create/reuse items in your Zotero library (must be explicit)")
-    ap.add_argument("--zotero-userid", default=os.environ.get("ZOTERO_USERID"),
-                    help="numeric Zotero userID; defaults to $ZOTERO_USERID")
-    ap.add_argument("--zotero-key", default=os.environ.get("ZOTERO_KEY"),
-                    help="read/write Zotero API key; defaults to $ZOTERO_KEY")
+    ap.add_argument("--zotero-userid",
+                    help="numeric Zotero userID; else $ZOTERO_USERID, else saved config")
+    ap.add_argument("--zotero-key",
+                    help="read/write Zotero API key; else $ZOTERO_KEY, else saved config")
     ap.add_argument("--review", action="store_true",
                     help="prompt for anything not auto-accepted instead of leaving it flagged")
+
+    creds = ap.add_argument_group("saved credentials")
+    creds.add_argument("--save-credentials", action="store_true",
+                       help=f"write the userID/key/mailto in use to {config.config_path()} "
+                            "and stop asking for them")
+    creds.add_argument("--forget-credentials", action="store_true",
+                       help="delete the saved credentials file")
+    creds.add_argument("--show-config", action="store_true",
+                       help="print where each setting is coming from, then exit")
     return ap
 
 
@@ -62,15 +74,33 @@ async def run(args) -> int:
     if args.live and not (args.zotero_userid and args.zotero_key):
         sys.exit(
             "--live needs a Zotero userID and API key.\n"
-            "  Pass --zotero-userid/--zotero-key, or set ZOTERO_USERID and ZOTERO_KEY.\n"
+            "  Pass --zotero-userid/--zotero-key once with --save-credentials and they are\n"
+            f"  remembered in {config.config_path()}; $ZOTERO_USERID/$ZOTERO_KEY also work.\n"
             "  Get both at https://www.zotero.org/settings/keys (key needs write access)."
         )
 
     os.makedirs(args.outdir, exist_ok=True)
-    doc = Document(args.manuscript)
+
+    # A mistyped filename is the most likely thing to go wrong here, and a
+    # python-docx traceback is a poor way to say so. The .doc/.pdf case is worth
+    # naming separately: those open as "not a Word file", which is true but
+    # unhelpful when the fix is simply to re-save as .docx.
+    if not os.path.isfile(args.manuscript):
+        sys.exit(f"Cannot read {args.manuscript}: no such file.")
+    try:
+        doc = Document(args.manuscript)
+    except Exception as exc:  # noqa: BLE001 - python-docx raises several types
+        hint = ""
+        if args.manuscript.lower().endswith((".doc", ".pdf", ".rtf", ".odt")):
+            hint = ("\n  Only .docx is supported. Open it in Word and use "
+                    "File > Save As > Word Document (.docx).")
+        sys.exit(f"Cannot read {args.manuscript}: {exc}{hint}")
 
     if args.bibliography:
-        biblio_text = open(args.bibliography, encoding="utf-8").read()
+        try:
+            biblio_text = open(args.bibliography, encoding="utf-8").read()
+        except OSError as exc:
+            sys.exit(f"Cannot read {args.bibliography}: {exc.strerror or exc}.")
         biblio_idx = len(doc.paragraphs)
     else:
         biblio_idx = find_biblio_index(doc)
@@ -161,8 +191,52 @@ async def run(args) -> int:
     return 1 if unresolved else 0
 
 
+def apply_settings(args) -> None:
+    """Fold saved config / environment into args, and service the credential
+    management flags. Runs before any work so --show-config and
+    --forget-credentials do not require a manuscript."""
+    cli = {
+        "zotero_userid": args.zotero_userid,
+        "zotero_key": args.zotero_key,
+        "mailto": args.mailto,
+    }
+
+    if args.forget_credentials:
+        path = config.config_path()
+        print(f"Removed {path}" if config.forget() else f"Nothing saved at {path}")
+        if not args.manuscript:
+            sys.exit(0)
+
+    if args.show_config:
+        print(f"config file: {config.config_path()}")
+        resolved = config.resolve(cli)
+        for field in config.FIELDS:
+            value = resolved[field] or ""
+            if field == "zotero_key" and value:
+                value = f"{value[:4]}...{value[-4:]}"
+            print(f"  {field:<14} {value or '(unset)':<28} from {config.source_of(field, cli)}")
+        sys.exit(0)
+
+    if args.save_credentials:
+        saved = {k: v for k, v in config.resolve(cli).items() if v}
+        if not saved:
+            sys.exit("--save-credentials: nothing to save. Pass --zotero-userid/--zotero-key "
+                     "(and optionally --mailto) alongside it.")
+        print(f"Saved {', '.join(sorted(saved))} to {config.save(saved)}")
+        if not args.manuscript:
+            sys.exit(0)
+
+    resolved = config.resolve(cli)
+    args.zotero_userid = resolved["zotero_userid"]
+    args.zotero_key = resolved["zotero_key"]
+    args.mailto = resolved["mailto"] or "you@example.com"
+
+
 def main() -> None:
     args = build_parser().parse_args()
+    apply_settings(args)
+    if not args.manuscript:
+        build_parser().error("the following arguments are required: --manuscript")
     sys.exit(asyncio.run(run(args)))
 
 
