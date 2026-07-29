@@ -17,7 +17,10 @@ import { get } from './base.js';
 import { partition } from './crossref.js';
 
 export const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
-const TOOL = 'zotprep';
+// NCBI's `tool` parameter, which identifies the client in their logs. The CLI
+// sends "zotprep"; this is a different application talking to the same API, so
+// it says so. Purely identification — it does not affect any result.
+const TOOL = 'z-link';
 
 const COLLECTIVE_RE = /(?<![\p{L}\p{N}_])(collaborators?|group|consortium|committee|network)(?![\p{L}\p{N}_])/iu;
 const YEAR_RE = /(?<![\p{L}\p{N}_])(19|20)\d{2}(?![\p{L}\p{N}_])/u;

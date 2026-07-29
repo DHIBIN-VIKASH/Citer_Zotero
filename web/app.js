@@ -1,21 +1,27 @@
 /**
- * UI wiring for the browser build.
+ * UI wiring for Z-Link.
  *
  * Credentials are the only thing persisted, in localStorage — the browser
  * equivalent of the CLI's ~/.zotprep/config.json, and for the same reason: not
  * re-entering a userID and API key on every run. The manuscript, the resolved
  * results and the resolution cache all live in memory and go away on reload.
+ *
+ * Every run writes to the reader's Zotero library; there is no dry-run mode.
+ * Because of that the credentials are required before the run button unlocks,
+ * and they are checked against the Zotero API before any resolution work
+ * starts — several minutes of searching followed by "your key is wrong" would
+ * be a poor way to find out.
  */
 import { finish, resolve } from './src/pipeline.js';
 import { applyDecision, cleanDoi, describe, optionsFor, pending } from './src/review.js';
 
 const $ = (id) => document.getElementById(id);
-const STORE = 'zotprep.credentials.v1';
+const STORE = 'zlink.credentials.v1';
+const LEGACY_STORE = 'zotprep.credentials.v1';
 
 const els = {
   tray: $('tray'), file: $('file'), trayTitle: $('trayTitle'), trayHint: $('trayHint'),
-  uid: $('uid'), key: $('key'), mailto: $('mailto'), live: $('live'),
-  biblio: $('biblio'), s2: $('s2'), workers: $('workers'),
+  uid: $('uid'), key: $('key'), mailto: $('mailto'),
   go: $('go'), cancel: $('cancel'), mode: $('mode'), credHint: $('credHint'),
   err: $('err'), errMsg: $('errMsg'),
   progress: $('progress'), stage: $('stage'), count: $('count'), bar: $('bar'),
@@ -23,33 +29,39 @@ const els = {
   tTotal: $('tTotal'), tOk: $('tOk'), tRev: $('tRev'), tMark: $('tMark'),
   advice: $('advice'), adviceWrap: $('adviceWrap'),
   warns: $('warns'), warnWrap: $('warnWrap'),
-  log: $('log'), logHead: $('logHead'), settings: $('settings'),
+  log: $('log'), logHead: $('logHead'),
   review: $('review'), cards: $('cards'), apply: $('apply'), skipAll: $('skipAll'),
   revCount: $('revCount'), revLede: $('revLede'),
+  help: $('help'), helpBtn: $('helpBtn'), helpClose: $('helpClose'), helpDone: $('helpDone'),
+  helpKeys: $('helpKeys'), helpOdfLink: $('helpOdfLink'),
+  tabKeys: $('tabKeys'), tabOdf: $('tabOdf'), paneKeys: $('paneKeys'), paneOdf: $('paneOdf'),
 };
+
+// Resolution runs at a fixed concurrency. The per-provider rate limits in
+// search/base.js are what actually keep the providers happy; this only bounds
+// how much is queued at once, so there was never a good reason to expose it.
+const WORKERS = 12;
 
 let chosenFile = null;
 let controller = null;
 let objectUrls = [];
-// state from resolve(), kept so finish() can be re-run after a review pass
 let runState = null;
 let runOpts = null;
-// n -> { kind, payload } for references the reader has decided this session
 let decisions = new Map();
 
 // ── persisted credentials ────────────────────────────────────────────────────
 function loadCreds() {
   let saved = {};
   try {
-    saved = JSON.parse(localStorage.getItem(STORE) || '{}');
+    saved = JSON.parse(localStorage.getItem(STORE)
+      || localStorage.getItem(LEGACY_STORE) || '{}');
   } catch {
     saved = {};
   }
   els.uid.value = saved.userid || '';
   els.key.value = saved.apiKey || '';
   els.mailto.value = saved.mailto || '';
-  els.s2.value = saved.s2Key || '';
-  refreshCredHint();
+  refreshCreds();
 }
 
 function saveCreds() {
@@ -57,46 +69,73 @@ function saveCreds() {
     userid: els.uid.value.trim(),
     apiKey: els.key.value.trim(),
     mailto: els.mailto.value.trim(),
-    s2Key: els.s2.value.trim(),
   };
   try {
     if (Object.values(payload).some(Boolean)) localStorage.setItem(STORE, JSON.stringify(payload));
     else localStorage.removeItem(STORE);
+    localStorage.removeItem(LEGACY_STORE);
   } catch {
     log('warn', 'This browser refused to save the credentials (private mode?), '
       + 'so they will need re-entering next time.');
   }
-  refreshCredHint();
+  refreshCreds();
 }
 
-function refreshCredHint() {
-  const hasKey = Boolean(els.uid.value.trim() && els.key.value.trim());
-  els.credHint.textContent = hasKey ? 'saved in this browser' : 'not set';
-  els.credHint.style.color = hasKey ? 'var(--sage)' : '';
+function hasCreds() {
+  return Boolean(els.uid.value.trim() && els.key.value.trim());
 }
 
-for (const el of [els.uid, els.key, els.mailto, els.s2]) {
+function refreshCreds() {
+  const ok = hasCreds();
+  els.credHint.textContent = ok ? 'saved in this browser' : 'needed to continue';
+  els.credHint.className = `state ${ok ? 'ok' : 'need'}`;
+  refreshGo();
+}
+
+function refreshGo() {
+  const ready = Boolean(chosenFile) && hasCreds();
+  els.go.disabled = !ready;
+  if (!chosenFile && !hasCreds()) els.mode.textContent = 'choose a document and enter your Zotero details';
+  else if (!chosenFile) els.mode.textContent = 'choose a document to begin';
+  else if (!hasCreds()) els.mode.textContent = 'enter your Zotero userID and API key above';
+  else els.mode.textContent = 'items will be created in your Zotero library';
+}
+
+for (const el of [els.uid, els.key, els.mailto]) {
+  el.addEventListener('input', refreshCreds);
   el.addEventListener('change', saveCreds);
   el.addEventListener('blur', saveCreds);
 }
 
-// ── mode indicator ───────────────────────────────────────────────────────────
-function refreshMode() {
-  if (els.live.checked) {
-    els.mode.innerHTML = 'mode <b class="hot">live</b> — items will be created in Zotero';
-    if (!(els.uid.value.trim() && els.key.value.trim())) els.settings.open = true;
-  } else {
-    els.mode.innerHTML = 'mode <b>dry run</b> — nothing will be written';
-  }
+// ── help dialog ──────────────────────────────────────────────────────────────
+function showHelp(which = 'keys') {
+  const onKeys = which === 'keys';
+  els.tabKeys.setAttribute('aria-selected', String(onKeys));
+  els.tabOdf.setAttribute('aria-selected', String(!onKeys));
+  els.paneKeys.hidden = !onKeys;
+  els.paneOdf.hidden = onKeys;
+  if (!els.help.open) els.help.showModal();
+  els.help.querySelector('.dlg-body').scrollTop = 0;
 }
-els.live.addEventListener('change', refreshMode);
+
+els.helpBtn.addEventListener('click', () => showHelp('keys'));
+els.helpKeys.addEventListener('click', () => showHelp('keys'));
+els.helpOdfLink.addEventListener('click', () => showHelp('odf'));
+els.tabKeys.addEventListener('click', () => showHelp('keys'));
+els.tabOdf.addEventListener('click', () => showHelp('odf'));
+els.helpClose.addEventListener('click', () => els.help.close());
+els.helpDone.addEventListener('click', () => els.help.close());
+els.help.addEventListener('click', (e) => {
+  // clicking the backdrop closes; clicking the panel does not
+  if (e.target === els.help) els.help.close();
+});
 
 // ── file selection ───────────────────────────────────────────────────────────
 function setFile(f) {
   if (!f) return;
   if (!f.name.toLowerCase().endsWith('.docx')) {
     showError('That is not a .docx. Word\'s older .doc format and PDFs cannot be read — '
-      + 'open the file in Word and "Save As" .docx first.');
+      + 'open the file in Word and use File > Save As > Word Document (.docx) first.');
     return;
   }
   chosenFile = f;
@@ -104,8 +143,8 @@ function setFile(f) {
   els.trayTitle.innerHTML = `<span class="filename">${escapeHtml(f.name)}</span>`;
   els.trayHint.innerHTML = `<span class="filesize">${(f.size / 1024).toFixed(0)} KB — `
     + 'click to choose a different file</span>';
-  els.go.disabled = false;
   hideError();
+  refreshGo();
 }
 
 els.tray.addEventListener('click', () => els.file.click());
@@ -167,7 +206,7 @@ function setProgress(done, total) {
 }
 
 const BADGE = {
-  ACCEPTED: ['b-acc', 'resolved'],
+  ACCEPTED: ['b-acc', 'in zotero'],
   FROM_TEXT: ['b-txt', 'from text'],
   REVIEW: ['b-rev', 'review'],
 };
@@ -179,16 +218,13 @@ function renderResults(out) {
   els.tRev.textContent = stats.unresolved.length;
   els.tMark.textContent = stats.nMarked;
 
-  // downloads
   for (const u of objectUrls) URL.revokeObjectURL(u);
   objectUrls = [];
   const base = (chosenFile.name || 'manuscript').replace(/\.docx$/i, '');
   els.downloads.innerHTML = '';
   for (const [blob, name, title, note] of [
-    [out.docxBlob, `${base}_scannable.docx`, 'Scannable manuscript',
-      'open Zotero → Tools → ODF Scan'],
-    [out.reportCsv, `${base}_report.csv`, 'Resolution report',
-      'one row per reference'],
+    [out.docxBlob, `${base}_scannable.docx`, 'Scannable manuscript', 'feed this to ODF Scan'],
+    [out.reportCsv, `${base}_report.csv`, 'Resolution report', 'one row per reference'],
   ]) {
     const url = URL.createObjectURL(blob);
     objectUrls.push(url);
@@ -201,14 +237,12 @@ function renderResults(out) {
     els.downloads.appendChild(a);
   }
 
-  // advisories and warnings
   els.adviceWrap.hidden = !out.advisories.length;
   els.advice.innerHTML = out.advisories
     .map(([n, note]) => `<p><span class="num">[${n}]</span> ${escapeHtml(note)}</p>`).join('');
   els.warnWrap.hidden = !out.warnings.length;
   els.warns.innerHTML = out.warnings.map((w) => `<p>${escapeHtml(w)}</p>`).join('');
 
-  // table
   const frag = document.createDocumentFragment();
   for (const n of [...results.keys()].sort((a, b) => a - b)) {
     const r = results.get(n);
@@ -288,7 +322,7 @@ function renderReview(out) {
       body.appendChild(p);
     }
 
-    options.forEach((c, i) => {
+    options.forEach((c) => {
       const d = describe(c);
       const opt = document.createElement('label');
       opt.className = 'opt';
@@ -316,12 +350,9 @@ function renderReview(out) {
       opt.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); opt.click(); }
       });
-      opt.dataset.i = String(i + 1);
       body.appendChild(opt);
     });
 
-    // actions: skip / paste a DOI / build from the reference text (books only,
-    // matching review.py, where [b] is offered only when ref.is_book)
     const actions = document.createElement('div');
     actions.className = 'rev-actions';
 
@@ -339,16 +370,15 @@ function renderReview(out) {
     doiBtn.textContent = 'Paste a DOI';
     actions.appendChild(doiBtn);
 
+    // Offered only for book-shaped references, which is where review.py offers
+    // [b]: a complete Vancouver book reference already carries every field
+    // Zotero needs, so no index has to hold it.
     if (ref.is_book) {
       const fromText = document.createElement('button');
       fromText.className = 'mini';
       fromText.textContent = 'Build from reference text';
-      fromText.title = 'A complete Vancouver book reference already contains every field '
-        + 'Zotero needs, so no index has to hold it.';
       fromText.addEventListener('click', () => {
-        decisions.set(n, {
-          kind: 'from-text', payload: {}, label: 'built from the reference text',
-        });
+        decisions.set(n, { kind: 'from-text', payload: {}, label: 'built from the reference text' });
         renderReview(out);
       });
       actions.appendChild(fromText);
@@ -377,7 +407,6 @@ function renderReview(out) {
     doiOk.addEventListener('click', takeDoi);
     doiIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') takeDoi(); });
     doiRow.append(doiIn, doiOk);
-
     doiBtn.addEventListener('click', () => {
       doiRow.classList.toggle('on');
       doiBtn.classList.toggle('on');
@@ -398,7 +427,7 @@ function renderReview(out) {
     : `${ns.length} awaiting a decision`;
 }
 
-/** Apply the session's decisions and regenerate the document and report. */
+/** Apply the session's decisions, add the newly accepted items, rebuild. */
 async function applyAndRebuild() {
   els.apply.disabled = true;
   els.skipAll.disabled = true;
@@ -417,7 +446,7 @@ async function applyAndRebuild() {
     renderResults(out);
     renderReview(out);
     log('info', `Applied ${decided} decision(s) and rebuilt: `
-      + `${out.stats.accepted} of ${out.stats.total} resolved, `
+      + `${out.stats.accepted} of ${out.stats.total} in Zotero, `
       + `${out.stats.nMarked} in-text citations rewritten.`);
     els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
@@ -442,14 +471,14 @@ els.skipAll.addEventListener('click', () => {
 
 // ── the run ──────────────────────────────────────────────────────────────────
 els.go.addEventListener('click', async () => {
-  if (!chosenFile) return;
+  if (!chosenFile || !hasCreds()) return;
   hideError();
   els.results.classList.remove('on');
+  els.review.classList.remove('on');
   els.log.replaceChildren();
   els.logHead.hidden = true;
   els.go.disabled = true;
   els.cancel.hidden = false;
-  els.review.classList.remove('on');
   decisions = new Map();
   controller = new AbortController();
   saveCreds();
@@ -458,12 +487,9 @@ els.go.addEventListener('click', async () => {
   try {
     runOpts = {
       mailto: els.mailto.value.trim() || 'you@example.com',
-      live: els.live.checked,
       userid: els.uid.value.trim(),
       apiKey: els.key.value.trim(),
-      bibliographyText: els.biblio.value,
-      s2Key: els.s2.value.trim(),
-      workers: Math.max(1, Math.min(32, parseInt(els.workers.value, 10) || 12)),
+      workers: WORKERS,
       signal: controller.signal,
     };
     const cbs = { onStage: (s) => setStage(s), onProgress: setProgress, onLog: log };
@@ -475,25 +501,19 @@ els.go.addEventListener('click', async () => {
     renderResults(out);
     renderReview(out);
     const secs = ((performance.now() - started) / 1000).toFixed(0);
-    log('info', `Done in ${secs}s. ${out.stats.accepted} of ${out.stats.total} resolved, `
-      + `${out.stats.nMarked} in-text citations rewritten`
-      + `${out.stats.dryRun ? ' (dry run — nothing written to Zotero)' : ''}.`);
+    log('info', `Done in ${secs}s. ${out.stats.accepted} of ${out.stats.total} references `
+      + `are now in your Zotero library, ${out.stats.nMarked} in-text citations rewritten.`);
     if (out.stats.unresolved.length) {
       log('warn', `${out.stats.unresolved.length} unresolved: [${out.stats.unresolved.join(', ')}] `
-        + '— marked "{NEEDS REVIEW: n}" in the document. '
-        + 'Decide them below, then rebuild.');
+        + '— marked "{NEEDS REVIEW: n}" in the document. Decide them below, then rebuild.');
     }
     els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
-    if (e?.name === 'AbortError') {
-      els.progress.classList.remove('on');
-      log('warn', 'Cancelled. Nothing was written.');
-    } else {
-      els.progress.classList.remove('on');
-      showError(e?.message || String(e));
-    }
+    els.progress.classList.remove('on');
+    if (e?.name === 'AbortError') log('warn', 'Cancelled.');
+    else showError(e?.message || String(e));
   } finally {
-    els.go.disabled = false;
+    refreshGo();
     els.cancel.hidden = true;
     controller = null;
   }
@@ -505,7 +525,6 @@ window.addEventListener('beforeunload', (e) => {
   if (controller) { e.preventDefault(); e.returnValue = ''; }
 });
 
-// ── capability check ─────────────────────────────────────────────────────────
 // DecompressionStream is what reads the .docx. Failing here with a clear message
 // beats failing later with "undefined is not a constructor".
 if (typeof DecompressionStream === 'undefined' || typeof CompressionStream === 'undefined') {
@@ -515,4 +534,4 @@ if (typeof DecompressionStream === 'undefined' || typeof CompressionStream === '
 }
 
 loadCreds();
-refreshMode();
+refreshGo();

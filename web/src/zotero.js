@@ -137,10 +137,19 @@ export async function enrich(cand, mailto, opts = {}) {
   return cand;
 }
 
-/** Reuses existing items instead of duplicating them. */
+/**
+ * Reuses existing items instead of duplicating them.
+ *
+ * There is no dry-run mode: every run adds its resolved references to the
+ * library. Two things carry the safety that a preview pass used to:
+ * `existingKey()` matches on DOI and on normalised title+year, so re-running a
+ * document reuses items rather than creating second copies; and only references
+ * that actually passed the accept gate are ever built into items, so an
+ * unresolved reference stays a `{NEEDS REVIEW}` marker rather than becoming a
+ * guess in someone's library.
+ */
 export class ZoteroWriter {
-  constructor(userid, apiKey, { dryRun = false, onLog = null } = {}) {
-    this.dryRun = dryRun;
+  constructor(userid, apiKey, { onLog = null } = {}) {
     this.userid = userid;
     this.apiKey = apiKey;
     this.byDoi = new Map();
@@ -177,7 +186,6 @@ export class ZoteroWriter {
 
   /** Index the existing library once, so duplicate checks are local. */
   async loadLibrary(onProgress = null) {
-    if (this.dryRun) return;
     let start = 0;
     for (;;) {
       const res = await fetch(
@@ -218,11 +226,6 @@ export class ZoteroWriter {
       const hit = this.existingKey(item);
       if (hit) keys.set(n, hit);
       else pending.push([n, item]);
-    }
-
-    if (this.dryRun) {
-      for (const [n] of pending) keys.set(n, `DRYRUN${String(n).padStart(3, '0')}`);
-      return keys;
     }
 
     for (let start = 0; start < pending.length; start += 50) {

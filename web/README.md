@@ -1,12 +1,31 @@
-# zotprep-web — browser port
+# Z-Link — browser build
 
-A static, browser-only build of zotprep, intended for GitHub Pages. No server,
+A static, browser-only build of the zotprep engine, for GitHub Pages. No server,
 no backend, no proxy: the page talks to Crossref, OpenAlex, Europe PMC, PubMed,
 Semantic Scholar and the Zotero API directly. All six send
 `Access-Control-Allow-Origin: *`, which is what makes that possible.
 
 The Zotero API key stays in the browser's `localStorage` and is sent only to
-`api.zotero.org`.
+`api.zotero.org`, in a request header rather than a query string.
+
+The Python package it is ported from keeps its own name, `zotprep` — the file
+headers throughout `src/` name the module each one mirrors, and those references
+are meant to stay accurate.
+
+## Every run writes to the library
+
+There is no dry-run mode. Three things do the work a preview pass used to:
+
+- **Credentials are verified before any resolution starts.** A wrong key fails
+  in about two seconds rather than after several minutes of searching.
+- **Existing items are matched and reused**, on DOI and on normalised
+  title+year, so re-running a document does not create second copies.
+- **Only references that passed the accept gate become items.** Anything
+  unresolved stays a `{NEEDS REVIEW: n}` marker in the document rather than
+  becoming a guess in someone's library.
+
+The review step is where an ambiguous reference gets decided, and nothing
+reaches the library without either clearing the gate or being chosen there.
 
 ## Why a port and not Pyodide
 
@@ -44,6 +63,10 @@ The end-to-end check is the one that ties it together: the same .docx through
 same status, tier, confidence, DOI and title for every reference, the same
 number of rewritten citations, the same unresolved list, and the same advisory
 and warning strings character for character.
+
+Note that the CLI keeps `--dry-run`, and that is what makes this comparison
+possible without touching a real library. Only the browser build requires the
+write.
 
 ### The layers that are not float-parity tested
 
@@ -105,7 +128,7 @@ and produce different doubles — `66.66666666666667` against
 
 ```
 web/
-  index.html           the app
+  index.html           the app, including the first-run help dialog
   app.js               UI wiring; credentials <-> localStorage
   src/
     fuzz.js            rapidfuzz's three metrics

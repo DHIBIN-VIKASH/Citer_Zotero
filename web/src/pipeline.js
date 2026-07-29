@@ -16,9 +16,13 @@
  * from an already-truncated body. Re-reading costs a few milliseconds and makes
  * "review, then rebuild" safe to repeat as many times as the reader likes.
  *
- * The one safety rule from the CLI is carried over exactly: writing to someone's
- * Zotero library is the only irreversible thing this tool does, so it must be
- * asked for explicitly. Dry run is the default here too.
+ * Unlike the CLI, there is no dry run: every run adds its resolved references to
+ * the reader's library. Three things do the work the preview pass used to do —
+ * credentials are verified before any resolution starts, existing items are
+ * matched and reused rather than duplicated, and only references that passed
+ * the accept gate become items at all. An unresolved reference stays a
+ * `{NEEDS REVIEW}` marker in the document instead of becoming a guess in
+ * someone's library.
  */
 import { Document, findBiblioIndex, makeRenderer, markBody, parseBibliography, removeFrom } from './docx.js';
 import { parseReference } from './extractor.js';
@@ -44,15 +48,15 @@ function toCsv(rows) {
  */
 export async function resolve(file, opts, cb = {}) {
   const {
-    mailto = 'you@example.com', live = false, userid = '', apiKey = '',
+    mailto = 'you@example.com', userid = '', apiKey = '',
     bibliographyText = '', workers = 12, s2Key = '', signal = null,
   } = opts;
   const onStage = cb.onStage || (() => {});
   const onProgress = cb.onProgress || (() => {});
   const onLog = cb.onLog || (() => {});
 
-  if (live && !(userid && apiKey)) {
-    throw new Error('Creating items in Zotero needs a userID and an API key. '
+  if (!(userid && apiKey)) {
+    throw new Error('Adding items to Zotero needs a userID and an API key. '
       + 'Get both at zotero.org/settings/keys — the key needs write access.');
   }
 
@@ -60,10 +64,8 @@ export async function resolve(file, opts, cb = {}) {
   setLogSink(onLog);
 
   // Fail on bad credentials before doing several minutes of resolution work.
-  if (live) {
-    onStage('verifying Zotero credentials');
-    await new ZoteroWriter(userid, apiKey, { dryRun: false, onLog }).verify();
-  }
+  onStage('verifying Zotero credentials');
+  await new ZoteroWriter(userid, apiKey, { onLog }).verify();
 
   onStage('reading the document');
   const buffer = await file.arrayBuffer();
@@ -77,8 +79,10 @@ export async function resolve(file, opts, cb = {}) {
   } else {
     biblioIdx = findBiblioIndex(doc);
     if (biblioIdx === null) {
-      throw new Error('No "References" heading found in the document. '
-        + 'Paste the bibliography into the box below, or add a References heading.');
+      throw new Error('No "References" heading found in this document. '
+        + 'Z-Link finds the bibliography by looking for a paragraph that reads exactly '
+        + '"References" (or "Bibliography", "Works Cited", or "Reference List"). '
+        + 'Add one on its own line above your reference list and try again.');
     }
     biblioText = doc.paragraphs.slice(biblioIdx + 1).map((p) => p.text).join('\n');
   }
@@ -108,13 +112,12 @@ export async function resolve(file, opts, cb = {}) {
  */
 export async function finish(state, opts, cb = {}) {
   const {
-    mailto = 'you@example.com', live = false, userid = '', apiKey = '', signal = null,
+    mailto = 'you@example.com', userid = '', apiKey = '', signal = null,
   } = opts;
   const onStage = cb.onStage || (() => {});
   const onProgress = cb.onProgress || (() => {});
   const onLog = cb.onLog || (() => {});
   const { buffer, refs, results, usedPastedBibliography } = state;
-  const dryRun = !live;
 
   setLogSink(onLog);
 
@@ -131,19 +134,17 @@ export async function finish(state, opts, cb = {}) {
     onProgress(++done, accepted.length);
   }
 
-  const writer = new ZoteroWriter(userid || '0', apiKey || '', { dryRun, onLog });
-  if (!dryRun) {
-    onStage('indexing your Zotero library for duplicates');
-    await writer.loadLibrary((n) => onLog('info', `  indexed ${n} items`));
-  }
+  const writer = new ZoteroWriter(userid, apiKey, { onLog });
+  onStage('indexing your Zotero library for duplicates');
+  await writer.loadLibrary((n) => onLog('info', `  indexed ${n} items`));
 
-  onStage(dryRun ? 'preparing items (dry run)' : 'creating items in Zotero');
+  onStage('adding items to Zotero');
   const items = accepted
     .filter((n) => results.get(n).candidate)
     .map((n) => [n, toItem(results.get(n).candidate, refs.get(n))]);
   const keys = await writer.create(items, (a, b) => onProgress(a, b));
   for (const [n, k] of keys) results.get(n).zotero_key = k;
-  onLog('info', `Zotero items ready: ${keys.size} (${dryRun ? 'dry run' : 'created/reused'})`);
+  onLog('info', `Zotero items ready: ${keys.size} created or reused`);
 
   // Re-read the document so this stage can run again after a review pass.
   onStage('rewriting citations');
@@ -183,7 +184,6 @@ export async function finish(state, opts, cb = {}) {
       accepted: accepted.length,
       unresolved,
       nMarked,
-      dryRun,
       created: keys.size,
     },
     warnings: [...new Set(warnings)],

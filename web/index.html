@@ -3,356 +3,301 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>zotprep — reference resolver</title>
-<meta name="description" content="Resolve a manuscript's bibliography against Crossref, PubMed, OpenAlex, Europe PMC and Semantic Scholar, and prepare a Zotero-linked .docx. Runs entirely in your browser.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2314120F'/><path d='M8 9h16M8 16h16M8 23h10' stroke='%23E0A82E' stroke-width='2.5' stroke-linecap='round'/></svg>">
+<title>Z-Link — reference resolver for Zotero</title>
+<meta name="description" content="Resolve a manuscript's bibliography against Crossref, PubMed, OpenAlex, Europe PMC and Semantic Scholar, add the items to your Zotero library, and get back a Scannable Cite .docx. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23F7F3EA'/><path d='M9 9h14L9 23h14' stroke='%239A6B12' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>">
 <style>
 /* ─────────────────────────────────────────────────────────────────────────
-   zotprep — "laboratory instrument" : warm ink, ruled paper, amber signal.
-   Serif + mono only. No grotesque, no third-party fonts, no external requests
-   of any kind: a manuscript is unpublished work and nothing here should be
-   able to phone home.
+   Z-Link — warm paper, ink, ochre signal. Serif + mono only.
+   No third-party fonts and no external requests of any kind: a manuscript is
+   unpublished work, and nothing on this page should be able to phone home.
    ───────────────────────────────────────────────────────────────────────── */
 :root{
-  --ink:#0E0D0B;
-  --ink-2:#14120F;
-  --panel:#1A1815;
-  --panel-2:#211E1A;
-  --rule:#2E2A24;
-  --rule-bright:#403A31;
-  --paper:#EDE7DA;
-  --paper-dim:#B3AB9B;
-  --paper-faint:#7D7566;
-  --amber:#E0A82E;
-  --amber-dim:#8A6A20;
-  --sage:#8CA86A;
-  --terra:#D0705A;
-  --slate:#7B9DB0;
-  --violet:#A98BC4;
+  --paper:#F7F3EA;
+  --card:#FFFDF8;
+  --card-2:#F1EADC;
+  --ink:#23201C;
+  --ink-2:#4A443B;
+  --muted:#6F6659;
+  --faint:#968C7C;
+  --rule:#DED5C4;
+  --rule-2:#C6BAA4;
+  --amber:#9A6B12;
+  --amber-2:#7C540B;
+  --amber-soft:#F7EBD2;
+  --sage:#47632F;
+  --sage-soft:#EDF1E4;
+  --terra:#A03D28;
+  --terra-soft:#FAE9E4;
+  --slate:#3A6076;
+  --slate-soft:#E8EFF3;
 
   --serif:'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua','Hoefler Text',Georgia,serif;
   --mono:'Cascadia Code','JetBrains Mono','IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
-
   --pad:clamp(1rem,3.2vw,2.75rem);
 }
-
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 body{
-  font-family:var(--serif);
-  background:var(--ink);
-  color:var(--paper);
-  line-height:1.55;
-  min-height:100vh;
-  overflow-x:hidden;
-  /* warm vignette + a faint horizon glow behind the masthead */
+  font-family:var(--serif);background:var(--paper);color:var(--ink);
+  line-height:1.55;min-height:100vh;overflow-x:hidden;
   background-image:
-    radial-gradient(120% 70% at 50% -10%, rgba(224,168,46,.10), transparent 60%),
-    radial-gradient(90% 60% at 100% 100%, rgba(123,157,176,.05), transparent 70%);
+    radial-gradient(120% 70% at 50% -10%, rgba(154,107,18,.07), transparent 60%),
+    radial-gradient(90% 60% at 100% 100%, rgba(58,96,118,.045), transparent 70%);
   background-attachment:fixed;
 }
-/* film grain — keeps the flat dark from looking like a default page */
-body::after{
-  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.16;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
-  mix-blend-mode:overlay;
+body::after{ /* paper tooth */
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.35;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+  mix-blend-mode:multiply;
 }
-
 .wrap{max-width:1180px;margin:0 auto;padding:var(--pad) var(--pad) 5rem}
 
 /* ── masthead ───────────────────────────────────────────────────────────── */
 header{
-  border-bottom:1px solid var(--rule);
-  padding-bottom:1.6rem;margin-bottom:2.5rem;
+  border-bottom:1px solid var(--rule);padding-bottom:1.6rem;margin-bottom:2.25rem;
   display:grid;grid-template-columns:1fr auto;gap:1.5rem;align-items:end;
   animation:rise .7s cubic-bezier(.2,.7,.3,1) both;
 }
-.brand{display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap}
-h1{
-  font-size:clamp(2.4rem,6vw,4rem);font-weight:400;letter-spacing:-.03em;line-height:.92;
-  font-feature-settings:"liga" 1;
-}
-h1 .dot{color:var(--amber)}
-.tagline{
-  font-family:var(--mono);font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;
-  color:var(--paper-faint);
-}
-.sub{color:var(--paper-dim);font-size:1.02rem;max-width:56ch;margin-top:.7rem;font-style:italic}
-.privacy{
-  font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--paper-faint);text-align:right;line-height:1.9;white-space:nowrap;
-}
+.brand{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap}
+h1{font-size:clamp(2.4rem,6vw,3.9rem);font-weight:400;letter-spacing:-.035em;line-height:.92}
+h1 .z{color:var(--amber)}
+.tagline{font-family:var(--mono);font-size:.68rem;letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
+.sub{color:var(--ink-2);font-size:1.02rem;max-width:58ch;margin-top:.7rem;font-style:italic}
+.head-side{display:flex;flex-direction:column;align-items:flex-end;gap:.8rem}
+.privacy{font-family:var(--mono);font-size:.64rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--faint);text-align:right;line-height:1.9;white-space:nowrap}
 .privacy b{color:var(--sage);font-weight:400}
 
-/* ── dropzone : a specimen tray with corner ticks ───────────────────────── */
-.tray{
-  position:relative;border:1px solid var(--rule);background:var(--panel);
-  padding:clamp(2rem,6vw,4.25rem) 1.5rem;text-align:center;cursor:pointer;
-  transition:border-color .25s,background .25s,transform .25s;
-  animation:rise .7s .08s cubic-bezier(.2,.7,.3,1) both;
-}
-.tray::before,.tray::after{
-  content:'';position:absolute;width:14px;height:14px;border:1px solid var(--amber-dim);
-  transition:border-color .25s,width .25s,height .25s;
-}
+/* ── buttons ────────────────────────────────────────────────────────────── */
+button{font-family:var(--mono);cursor:pointer;border-radius:0;transition:all .18s}
+.go{background:var(--amber);color:#FFFCF5;border:1px solid var(--amber);
+  padding:.85rem 2.1rem;font-size:.78rem;letter-spacing:.16em;text-transform:uppercase}
+.go:hover:not(:disabled){background:var(--amber-2);border-color:var(--amber-2);transform:translateY(-1px)}
+.go:disabled{opacity:.38;cursor:not-allowed}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--rule-2);
+  padding:.85rem 1.5rem;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase}
+.ghost:hover{border-color:var(--ink-2);color:var(--ink)}
+.helpbtn{background:var(--card);color:var(--amber);border:1px solid var(--amber);
+  padding:.6rem 1.2rem;font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:.55rem}
+.helpbtn:hover{background:var(--amber-soft)}
+.helpbtn .q{font-size:.95rem;line-height:1}
+
+/* ── dropzone ───────────────────────────────────────────────────────────── */
+.tray{position:relative;border:1px solid var(--rule);background:var(--card);
+  padding:clamp(2rem,6vw,4rem) 1.5rem;text-align:center;cursor:pointer;
+  transition:border-color .22s,background .22s,transform .22s;
+  animation:rise .7s .07s cubic-bezier(.2,.7,.3,1) both}
+.tray::before,.tray::after{content:'';position:absolute;width:14px;height:14px;
+  border:1px solid var(--rule-2);transition:all .22s}
 .tray::before{top:9px;left:9px;border-right:0;border-bottom:0}
 .tray::after{bottom:9px;right:9px;border-left:0;border-top:0}
-.tray:hover,.tray:focus-visible{border-color:var(--rule-bright);background:var(--panel-2);outline:none}
+.tray:hover,.tray:focus-visible{border-color:var(--rule-2);background:#FFFEFB;outline:none}
 .tray:hover::before,.tray:hover::after{width:22px;height:22px;border-color:var(--amber)}
-.tray.over{border-color:var(--amber);background:#231F17;transform:scale(.994)}
+.tray.over{border-color:var(--amber);background:var(--amber-soft);transform:scale(.994)}
 .tray.over::before,.tray.over::after{width:28px;height:28px;border-color:var(--amber)}
-.tray.loaded{border-color:var(--amber-dim);border-style:solid}
-.tray h2{font-size:clamp(1.3rem,3vw,1.85rem);font-weight:400;letter-spacing:-.015em}
-.tray p{color:var(--paper-faint);font-size:.9rem;margin-top:.5rem}
-.tray .glyph{
-  font-family:var(--mono);font-size:2rem;color:var(--amber);display:block;margin-bottom:.85rem;
-  letter-spacing:.1em;
-}
-.filename{font-family:var(--mono);font-size:.86rem;color:var(--amber);word-break:break-all}
-.filesize{font-family:var(--mono);font-size:.72rem;color:var(--paper-faint);margin-top:.3rem}
+.tray.loaded{border-color:var(--amber)}
+.tray h2{font-size:clamp(1.3rem,3vw,1.8rem);font-weight:400;letter-spacing:-.015em}
+.tray p{color:var(--faint);font-size:.9rem;margin-top:.5rem}
+.tray .glyph{font-family:var(--mono);font-size:1.9rem;color:var(--amber);display:block;
+  margin-bottom:.8rem;letter-spacing:.1em}
+.filename{font-family:var(--mono);font-size:.86rem;color:var(--amber-2);word-break:break-all}
+.filesize{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin-top:.3rem}
 
-/* ── panels ─────────────────────────────────────────────────────────────── */
-details.panel{
-  border:1px solid var(--rule);border-top:0;background:var(--panel);
-  animation:rise .7s .14s cubic-bezier(.2,.7,.3,1) both;
-}
-details.panel > summary{
-  list-style:none;cursor:pointer;padding:.95rem 1.25rem;
-  font-family:var(--mono);font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;
-  color:var(--paper-dim);display:flex;align-items:center;gap:.7rem;user-select:none;
-  transition:color .2s,background .2s;
-}
-details.panel > summary::-webkit-details-marker{display:none}
-details.panel > summary:hover{color:var(--paper);background:var(--panel-2)}
-details.panel > summary::before{content:'+';color:var(--amber);font-size:.95rem;line-height:1}
-details.panel[open] > summary::before{content:'−'}
-details.panel > summary .hint{
-  margin-left:auto;color:var(--paper-faint);letter-spacing:.08em;text-transform:none;
-  font-size:.68rem;
-}
-.panel-body{padding:.4rem 1.25rem 1.5rem;border-top:1px dashed var(--rule)}
-
-.field{margin-top:1.15rem}
-.field label{
-  display:block;font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--paper-faint);margin-bottom:.4rem;
-}
-.field .note{font-size:.83rem;color:var(--paper-faint);margin-top:.4rem;font-style:italic;line-height:1.5}
+/* ── credentials ────────────────────────────────────────────────────────── */
+.panel{border:1px solid var(--rule);border-top:0;background:var(--card);
+  animation:rise .7s .13s cubic-bezier(.2,.7,.3,1) both}
+.panel > .head{padding:.95rem 1.25rem;border-bottom:1px dashed var(--rule);
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
+.panel > .head .state{margin-left:auto;letter-spacing:.06em;text-transform:none;font-size:.68rem}
+.panel > .head .state.ok{color:var(--sage)}
+.panel > .head .state.need{color:var(--terra)}
+.panel-body{padding:.35rem 1.25rem 1.5rem}
+.field{margin-top:1.1rem}
+.field label{display:block;font-family:var(--mono);font-size:.66rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--faint);margin-bottom:.4rem}
+.field .note{font-size:.83rem;color:var(--muted);margin-top:.4rem;font-style:italic;line-height:1.5}
+.field .note a{color:var(--amber);text-underline-offset:2px}
+.linklike{background:none;border:0;padding:0;color:var(--amber);font-family:var(--serif);
+  font-size:inherit;font-style:italic;text-decoration:underline;text-underline-offset:2px}
+.linklike:hover{color:var(--amber-2)}
 input[type=text],input[type=password],input[type=email],textarea{
-  width:100%;background:var(--ink-2);border:1px solid var(--rule);color:var(--paper);
-  font-family:var(--mono);font-size:.86rem;padding:.62rem .75rem;border-radius:0;
-  transition:border-color .2s,background .2s;
-}
-input:focus,textarea:focus{outline:none;border-color:var(--amber);background:#100E0B}
-input::placeholder,textarea::placeholder{color:#5A5348}
-textarea{resize:vertical;min-height:7rem;line-height:1.5;font-size:.8rem}
-.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1.15rem}
+  width:100%;background:#FFFEFC;border:1px solid var(--rule-2);color:var(--ink);
+  font-family:var(--mono);font-size:.86rem;padding:.62rem .75rem;border-radius:0}
+input:focus,textarea:focus{outline:none;border-color:var(--amber);background:#fff}
+input::placeholder{color:#B5AB99}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1.1rem}
+.writes{margin-top:1.3rem;border:1px solid var(--rule);border-left:2px solid var(--amber);
+  background:var(--amber-soft);padding:.9rem 1.1rem;font-size:.9rem;color:var(--ink-2)}
+.writes b{font-weight:400;color:var(--ink)}
 
-/* live-write switch */
-.danger{
-  margin-top:1.4rem;border:1px solid var(--rule);border-left:2px solid var(--terra);
-  padding:1rem 1.15rem;background:#1E1613;
-}
-.switch{display:flex;align-items:flex-start;gap:.8rem;cursor:pointer}
-.switch input{appearance:none;margin:0;flex:0 0 auto;width:38px;height:21px;border-radius:11px;
-  background:var(--rule);border:1px solid var(--rule-bright);position:relative;cursor:pointer;
-  transition:background .22s,border-color .22s;margin-top:.15rem}
-.switch input::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;
-  border-radius:50%;background:var(--paper-faint);transition:transform .22s,background .22s}
-.switch input:checked{background:#4A2B22;border-color:var(--terra)}
-.switch input:checked::after{transform:translateX(17px);background:var(--terra)}
-.switch input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
-.switch .txt strong{display:block;font-size:.98rem;font-weight:400}
-.switch .txt span{font-size:.84rem;color:var(--paper-faint);font-style:italic}
-
-/* ── action bar ─────────────────────────────────────────────────────────── */
-.actions{
-  display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1.75rem;
-  animation:rise .7s .2s cubic-bezier(.2,.7,.3,1) both;
-}
-button{font-family:var(--mono);cursor:pointer;border-radius:0;transition:all .2s}
-.go{
-  background:var(--amber);color:#17130A;border:1px solid var(--amber);
-  padding:.85rem 2.1rem;font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;
-  position:relative;overflow:hidden;
-}
-.go:hover:not(:disabled){background:#F0BC4B;border-color:#F0BC4B;transform:translateY(-1px)}
-.go:active:not(:disabled){transform:translateY(0)}
-.go:disabled{opacity:.35;cursor:not-allowed}
-.ghost{
-  background:transparent;color:var(--paper-dim);border:1px solid var(--rule);
-  padding:.85rem 1.5rem;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;
-}
-.ghost:hover{border-color:var(--paper-faint);color:var(--paper)}
-.mode{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;color:var(--paper-faint)}
-.mode b{color:var(--sage);font-weight:400}
-.mode b.hot{color:var(--terra)}
+.actions{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1.6rem;
+  animation:rise .7s .19s cubic-bezier(.2,.7,.3,1) both}
+.mode{font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;color:var(--faint)}
 
 /* ── progress ───────────────────────────────────────────────────────────── */
-#progress{display:none;margin-top:2.25rem;border:1px solid var(--rule);background:var(--panel);padding:1.35rem 1.4rem}
+#progress{display:none;margin-top:2rem;border:1px solid var(--rule);background:var(--card);padding:1.3rem 1.35rem}
 #progress.on{display:block;animation:rise .45s cubic-bezier(.2,.7,.3,1) both}
 .stage{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap}
-.stage .what{font-size:1.06rem}
-.stage .what::after{content:'';display:inline-block;width:.6em;text-align:left;animation:dots 1.4s steps(4,end) infinite}
-.stage .count{font-family:var(--mono);font-size:.78rem;color:var(--amber);letter-spacing:.08em}
-.bar{height:2px;background:var(--rule);margin-top:1rem;overflow:hidden;position:relative}
+.stage .what{font-size:1.05rem}
+.stage .what::after{content:'';display:inline-block;width:.6em;animation:dots 1.4s steps(4,end) infinite}
+.stage .count{font-family:var(--mono);font-size:.78rem;color:var(--amber);letter-spacing:.07em}
+.bar{height:2px;background:var(--rule);margin-top:1rem;overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:var(--amber);transition:width .35s cubic-bezier(.4,0,.2,1)}
 .bar.indet i{width:35%;animation:sweep 1.5s cubic-bezier(.4,0,.6,1) infinite}
 
 /* ── results ────────────────────────────────────────────────────────────── */
-#results{display:none;margin-top:2.75rem}
+#results{display:none;margin-top:2.5rem}
 #results.on{display:block}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
-.tile{background:var(--panel);padding:1.35rem 1.25rem}
-.tile .n{font-family:var(--mono);font-size:2.1rem;line-height:1;letter-spacing:-.04em}
-.tile .k{font-family:var(--mono);font-size:.63rem;letter-spacing:.18em;text-transform:uppercase;color:var(--paper-faint);margin-top:.6rem}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule)}
+.tile{background:var(--card);padding:1.3rem 1.2rem}
+.tile .n{font-family:var(--mono);font-size:2.05rem;line-height:1;letter-spacing:-.04em}
+.tile .k{font-family:var(--mono);font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--faint);margin-top:.6rem}
 .tile.ok .n{color:var(--sage)} .tile.warn .n{color:var(--terra)} .tile.acc .n{color:var(--amber)}
-
-.downloads{display:flex;gap:1rem;flex-wrap:wrap;margin-top:1.75rem}
-.dl{
-  display:flex;align-items:center;gap:.85rem;text-decoration:none;color:var(--paper);
-  border:1px solid var(--rule);background:var(--panel);padding:.9rem 1.35rem;transition:all .2s;
-}
-.dl:hover{border-color:var(--amber);background:var(--panel-2);transform:translateY(-1px)}
-.dl .ic{font-family:var(--mono);color:var(--amber);font-size:1.15rem}
-.dl .t{font-size:.98rem;line-height:1.25}
-.dl .s{font-family:var(--mono);font-size:.66rem;color:var(--paper-faint);letter-spacing:.1em;text-transform:uppercase}
-
-h3.sec{
-  font-family:var(--mono);font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;
-  color:var(--paper-faint);margin:2.5rem 0 .9rem;font-weight:400;
-  display:flex;align-items:center;gap:.9rem;
-}
+.downloads{display:flex;gap:1rem;flex-wrap:wrap;margin-top:1.6rem}
+.dl{display:flex;align-items:center;gap:.85rem;text-decoration:none;color:var(--ink);
+  border:1px solid var(--rule);background:var(--card);padding:.9rem 1.3rem}
+.dl:hover{border-color:var(--amber);background:var(--amber-soft);transform:translateY(-1px)}
+.dl .ic{font-family:var(--mono);color:var(--amber);font-size:1.1rem}
+.dl .t{font-size:.97rem;line-height:1.25}
+.dl .s{font-family:var(--mono);font-size:.65rem;color:var(--faint);letter-spacing:.09em;text-transform:uppercase}
+.nextstep{margin-top:1.1rem;font-size:.93rem;color:var(--ink-2)}
+.nextstep button{background:none;border:0;color:var(--amber);font-family:var(--serif);
+  font-size:.93rem;text-decoration:underline;text-underline-offset:2px;padding:0}
+h3.sec{font-family:var(--mono);font-size:.66rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--faint);margin:2.4rem 0 .9rem;font-weight:400;display:flex;align-items:center;gap:.9rem}
 h3.sec::after{content:'';flex:1;height:1px;background:var(--rule)}
-
-.notes{border:1px solid var(--rule);border-left:2px solid var(--amber);background:var(--panel);padding:1.1rem 1.3rem}
-.notes p{font-size:.92rem;margin:.55rem 0;color:var(--paper-dim)}
+.notes{border:1px solid var(--rule);border-left:2px solid var(--amber);background:var(--card);padding:1.05rem 1.25rem}
+.notes p{font-size:.92rem;margin:.55rem 0;color:var(--ink-2)}
 .notes p:first-child{margin-top:0} .notes p:last-child{margin-bottom:0}
 .notes .num{font-family:var(--mono);color:var(--amber);font-size:.8rem}
-
-.tablewrap{border:1px solid var(--rule);overflow-x:auto;background:var(--panel)}
+.tablewrap{border:1px solid var(--rule);overflow-x:auto;background:var(--card)}
 table{border-collapse:collapse;width:100%;min-width:720px}
-th{
-  font-family:var(--mono);font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--paper-faint);text-align:left;font-weight:400;padding:.8rem 1rem;
-  border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--panel-2);
-}
+th{font-family:var(--mono);font-size:.61rem;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--faint);text-align:left;font-weight:400;padding:.8rem 1rem;
+  border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--card-2)}
 td{padding:.72rem 1rem;border-bottom:1px solid var(--rule);vertical-align:top;font-size:.93rem}
 tr:last-child td{border-bottom:0}
-tbody tr{transition:background .15s}
-tbody tr:hover{background:var(--panel-2)}
-td.n{font-family:var(--mono);color:var(--paper-faint);font-size:.82rem;width:3rem;text-align:right}
+tbody tr:hover{background:var(--card-2)}
+td.n{font-family:var(--mono);color:var(--faint);font-size:.82rem;width:3rem;text-align:right}
 td.ttl{max-width:34rem}
-td.ttl .why{display:block;font-size:.82rem;color:var(--paper-faint);font-style:italic;margin-top:.25rem}
-td.doi{font-family:var(--mono);font-size:.74rem;color:var(--paper-faint);word-break:break-all;max-width:15rem}
-.badge{
-  font-family:var(--mono);font-size:.6rem;letter-spacing:.13em;text-transform:uppercase;
-  padding:.24rem .6rem;border:1px solid;white-space:nowrap;display:inline-block;
-}
-.b-acc{color:var(--sage);border-color:#3D4A2E;background:#1B2015}
-.b-txt{color:var(--slate);border-color:#2C3D46;background:#151C20}
-.b-rev{color:var(--terra);border-color:#4A2B22;background:#201411}
-.tier{font-family:var(--mono);font-size:.66rem;color:var(--paper-faint);letter-spacing:.06em}
+td.ttl .why{display:block;font-size:.82rem;color:var(--faint);font-style:italic;margin-top:.25rem}
+td.doi{font-family:var(--mono);font-size:.73rem;color:var(--muted);word-break:break-all;max-width:15rem}
+.badge{font-family:var(--mono);font-size:.59rem;letter-spacing:.12em;text-transform:uppercase;
+  padding:.24rem .6rem;border:1px solid;white-space:nowrap;display:inline-block}
+.b-acc{color:var(--sage);border-color:#B9C9A8;background:var(--sage-soft)}
+.b-txt{color:var(--slate);border-color:#B4C9D5;background:var(--slate-soft)}
+.b-rev{color:var(--terra);border-color:#E0BAB0;background:var(--terra-soft)}
+.tier{font-family:var(--mono);font-size:.66rem;color:var(--faint)}
 
 /* ── review ─────────────────────────────────────────────────────────────── */
-#review{display:none;margin-top:2.75rem}
+#review{display:none;margin-top:2.5rem}
 #review.on{display:block;animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
-.rev-lede{
-  border:1px solid var(--rule);border-left:2px solid var(--amber);background:var(--panel);
-  padding:1.1rem 1.3rem;color:var(--paper-dim);font-size:.95rem;
-}
-.rev-lede b{color:var(--paper);font-weight:400}
-.card{border:1px solid var(--rule);background:var(--panel);margin-top:1.25rem}
-.card.done{border-color:var(--rule);opacity:.72}
-.card.done:hover{opacity:1}
-.card > header{
-  padding:1rem 1.25rem;border-bottom:1px dashed var(--rule);display:flex;gap:1rem;align-items:flex-start;
-}
-.card .idx{
-  font-family:var(--mono);color:var(--amber);font-size:.8rem;flex:0 0 auto;
-  border:1px solid var(--amber-dim);padding:.1rem .5rem;line-height:1.5;
-}
-.card .raw{font-size:.95rem;line-height:1.5}
-.card .why{
-  display:block;font-family:var(--mono);font-size:.72rem;color:var(--terra);
-  margin-top:.45rem;letter-spacing:.02em;
-}
-.card-body{padding:1.1rem 1.25rem}
-.opt{
-  display:block;border:1px solid var(--rule);background:var(--ink-2);padding:.85rem 1rem;
-  margin-bottom:.7rem;cursor:pointer;transition:border-color .18s,background .18s;
-}
-.opt:hover{border-color:var(--rule-bright);background:#17150F}
-.opt.sel{border-color:var(--amber);background:#221D12}
-.opt .ot{font-size:.95rem;line-height:1.4}
-.opt .om{
-  font-family:var(--mono);font-size:.7rem;color:var(--paper-faint);margin-top:.45rem;
-  display:flex;flex-wrap:wrap;gap:.3rem .9rem;
-}
-.opt .om b{color:var(--paper-dim);font-weight:400}
+.rev-lede{border:1px solid var(--rule);border-left:2px solid var(--amber);background:var(--card);
+  padding:1.05rem 1.25rem;color:var(--ink-2);font-size:.94rem}
+.rev-lede b{color:var(--ink);font-weight:400}
+.card{border:1px solid var(--rule);background:var(--card);margin-top:1.2rem}
+.card.done{opacity:.7}.card.done:hover{opacity:1}
+.card > header{padding:1rem 1.2rem;border-bottom:1px dashed var(--rule);display:flex;gap:1rem;align-items:flex-start}
+.card .idx{font-family:var(--mono);color:var(--amber);font-size:.8rem;flex:0 0 auto;
+  border:1px solid var(--rule-2);padding:.1rem .5rem;line-height:1.5}
+.card .raw{font-size:.94rem;line-height:1.5}
+.card .why{display:block;font-family:var(--mono);font-size:.71rem;color:var(--terra);margin-top:.45rem}
+.card-body{padding:1.05rem 1.2rem}
+.opt{display:block;border:1px solid var(--rule);background:#FFFEFC;padding:.85rem 1rem;
+  margin-bottom:.7rem;cursor:pointer}
+.opt:hover{border-color:var(--rule-2);background:var(--card-2)}
+.opt.sel{border-color:var(--amber);background:var(--amber-soft)}
+.opt .ot{font-size:.94rem;line-height:1.4}
+.opt .om{font-family:var(--mono);font-size:.7rem;color:var(--faint);margin-top:.45rem;
+  display:flex;flex-wrap:wrap;gap:.3rem .9rem}
+.opt .om b{color:var(--muted);font-weight:400}
 .opt .om .pv{color:var(--slate)}
-.opt .cur{
-  font-family:var(--mono);font-size:.6rem;letter-spacing:.13em;text-transform:uppercase;
-  color:var(--amber);border:1px solid var(--amber-dim);padding:.1rem .4rem;margin-left:.5rem;
-}
-.none{font-style:italic;color:var(--paper-faint);font-size:.92rem;margin-bottom:.9rem}
+.opt .cur{font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--amber);border:1px solid var(--rule-2);padding:.1rem .4rem;margin-left:.5rem}
+.none{font-style:italic;color:var(--faint);font-size:.92rem;margin-bottom:.9rem}
 .rev-actions{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:.4rem}
-.mini{
-  background:transparent;color:var(--paper-dim);border:1px solid var(--rule);
-  padding:.5rem 1rem;font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
-}
-.mini:hover{border-color:var(--paper-faint);color:var(--paper)}
+.mini{background:transparent;color:var(--muted);border:1px solid var(--rule-2);
+  padding:.5rem 1rem;font-size:.67rem;letter-spacing:.12em;text-transform:uppercase}
+.mini:hover{border-color:var(--ink-2);color:var(--ink)}
 .mini.on{border-color:var(--amber);color:var(--amber)}
 .doi-row{display:none;gap:.5rem;margin-top:.7rem;width:100%}
 .doi-row.on{display:flex}
 .doi-row input{flex:1}
-.verdict{
-  font-family:var(--mono);font-size:.74rem;color:var(--sage);letter-spacing:.02em;
-  display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;
-}
-.verdict.skip{color:var(--paper-faint)}
-.rev-foot{
-  display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1.75rem;
-  padding-top:1.5rem;border-top:1px solid var(--rule);
-}
-.rev-count{font-family:var(--mono);font-size:.72rem;color:var(--paper-faint);letter-spacing:.1em}
+.verdict{font-family:var(--mono);font-size:.74rem;color:var(--sage);display:flex;
+  align-items:center;gap:.8rem;flex-wrap:wrap}
+.verdict.skip{color:var(--faint)}
+.rev-foot{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1.6rem;
+  padding-top:1.4rem;border-top:1px solid var(--rule)}
+.rev-count{font-family:var(--mono);font-size:.71rem;color:var(--faint);letter-spacing:.09em}
 .rev-count b{color:var(--amber);font-weight:400}
 
-/* ── log ────────────────────────────────────────────────────────────────── */
-#log{
-  font-family:var(--mono);font-size:.75rem;line-height:1.75;color:var(--paper-faint);
-  background:var(--ink-2);border:1px solid var(--rule);padding:1rem 1.15rem;
-  max-height:16rem;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
-}
+/* ── log & errors ───────────────────────────────────────────────────────── */
+#log{font-family:var(--mono);font-size:.75rem;line-height:1.75;color:var(--muted);
+  background:var(--card-2);border:1px solid var(--rule);padding:1rem 1.1rem;
+  max-height:16rem;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
 #log .warn{color:var(--terra)}
-#log .info{color:var(--paper-dim)}
+#log .info{color:var(--ink-2)}
 #log:empty{display:none}
-
-.err{
-  border:1px solid var(--terra);border-left-width:2px;background:#1E1411;
-  padding:1.1rem 1.3rem;margin-top:1.75rem;color:var(--paper);display:none;
-}
+.err{border:1px solid var(--terra);border-left-width:2px;background:var(--terra-soft);
+  padding:1.05rem 1.25rem;margin-top:1.6rem;display:none}
 .err.on{display:block;animation:rise .4s cubic-bezier(.2,.7,.3,1) both}
-.err b{color:var(--terra);font-weight:400;display:block;font-family:var(--mono);font-size:.68rem;
-  letter-spacing:.18em;text-transform:uppercase;margin-bottom:.5rem}
+.err b{color:var(--terra);font-weight:400;display:block;font-family:var(--mono);
+  font-size:.67rem;letter-spacing:.16em;text-transform:uppercase;margin-bottom:.5rem}
 
-footer{
-  margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--rule);
-  font-family:var(--mono);font-size:.68rem;color:var(--paper-faint);line-height:2;
-  display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;
-}
-footer a{color:var(--paper-dim)}
-footer a:hover{color:var(--amber)}
+/* ── help dialog ────────────────────────────────────────────────────────── */
+dialog{border:1px solid var(--rule-2);background:var(--card);color:var(--ink);padding:0;
+  max-width:760px;width:calc(100% - 2rem);max-height:86vh;box-shadow:0 18px 50px rgba(35,32,28,.18)}
+dialog::backdrop{background:rgba(35,32,28,.42)}
+.dlg-head{display:flex;align-items:center;gap:1rem;padding:1.2rem 1.5rem;border-bottom:1px solid var(--rule);
+  position:sticky;top:0;background:var(--card);z-index:2}
+.dlg-head h2{font-size:1.45rem;font-weight:400;letter-spacing:-.02em;flex:1}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--rule);position:sticky;top:66px;background:var(--card);z-index:2}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:.85rem 1.5rem;
+  font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected=true]{color:var(--amber);border-bottom-color:var(--amber)}
+.dlg-body{padding:1.5rem;overflow-y:auto}
+.guide h3{font-size:1.1rem;font-weight:400;margin:1.6rem 0 .6rem}
+.guide h3:first-child{margin-top:0}
+.guide ol{margin:0 0 .5rem 0;padding:0;list-style:none;counter-reset:s}
+.guide ol > li{counter-increment:s;position:relative;padding:.55rem 0 .55rem 2.6rem;
+  font-size:.97rem;line-height:1.6;border-bottom:1px dashed var(--rule)}
+.guide ol > li:last-child{border-bottom:0}
+.guide ol > li::before{content:counter(s);position:absolute;left:0;top:.62rem;
+  font-family:var(--mono);font-size:.7rem;color:var(--amber);border:1px solid var(--rule-2);
+  width:1.7rem;height:1.7rem;display:grid;place-items:center}
+.guide code{font-family:var(--mono);font-size:.84em;background:var(--card-2);
+  border:1px solid var(--rule);padding:.08em .35em}
+.guide a{color:var(--amber);text-underline-offset:2px;word-break:break-all}
+.guide .callout{border:1px solid var(--rule);border-left:2px solid var(--amber);
+  background:var(--amber-soft);padding:.85rem 1.05rem;margin:1rem 0;font-size:.92rem;color:var(--ink-2)}
+.guide .callout b{color:var(--ink);font-weight:400}
+.guide .warnout{border-left-color:var(--terra);background:var(--terra-soft)}
+.guide p{font-size:.95rem;color:var(--ink-2);margin:.7rem 0}
+.dlg-foot{padding:1rem 1.5rem;border-top:1px solid var(--rule);display:flex;justify-content:flex-end;
+  position:sticky;bottom:0;background:var(--card)}
+
+footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:.67rem;color:var(--faint);line-height:2;
+  display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap}
 
 @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(386%)}}
 @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
 @media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important}
 }
 @media (max-width:640px){
   header{grid-template-columns:1fr}
+  .head-side{align-items:flex-start}
   .privacy{text-align:left}
+  .tabs{top:62px}
 }
 </style>
 </head>
@@ -362,92 +307,62 @@ footer a:hover{color:var(--amber)}
   <header>
     <div>
       <div class="brand">
-        <h1>zotprep<span class="dot">.</span></h1>
-        <span class="tagline">v5 · browser build</span>
+        <h1><span class="z">Z</span>-Link</h1>
+        <span class="tagline">reference resolver for Zotero</span>
       </div>
-      <p class="sub">Resolves a manuscript's bibliography against five indexes, then hands back a
-        Scannable&nbsp;Cite&nbsp;.docx ready for Zotero's ODF Scan.</p>
+      <p class="sub">Reads your manuscript's bibliography, finds each reference across five
+        indexes, adds the items to your Zotero library, and hands back a Scannable&nbsp;Cite
+        .docx ready for ODF&nbsp;Scan.</p>
     </div>
-    <div class="privacy">
-      <b>your manuscript never leaves this tab</b><br>
-      no server · no upload · no tracking<br>
-      <span id="engineNote">engine verified against the Python original</span>
+    <div class="head-side">
+      <button class="helpbtn" id="helpBtn"><span class="q">?</span> First time here</button>
+      <div class="privacy">
+        <b>your manuscript never leaves this tab</b><br>
+        no server · no upload · no tracking
+      </div>
     </div>
   </header>
 
-  <div class="tray" id="tray" tabindex="0" role="button"
-       aria-label="Choose or drop a .docx manuscript">
+  <div class="tray" id="tray" tabindex="0" role="button" aria-label="Choose or drop a .docx manuscript">
     <span class="glyph">[ ]</span>
     <h2 id="trayTitle">Drop your manuscript here</h2>
     <p id="trayHint">a .docx with a “References” heading — or click to choose</p>
   </div>
   <input type="file" id="file" accept=".docx" hidden>
 
-  <details class="panel" id="settings">
-    <summary>Zotero &amp; contact <span class="hint" id="credHint">not set</span></summary>
+  <section class="panel">
+    <div class="head">Your Zotero account
+      <span class="state need" id="credHint">needed to continue</span></div>
     <div class="panel-body">
       <div class="row">
         <div class="field">
           <label for="uid">Zotero userID</label>
           <input type="text" id="uid" placeholder="1234567" inputmode="numeric" autocomplete="off" spellcheck="false">
-          <p class="note">The <em>number</em> on zotero.org/settings/keys — not your username.</p>
+          <p class="note">The <em>number</em>, not your username.
+            <button class="linklike" id="helpKeys" type="button">Where do I find this?</button></p>
         </div>
         <div class="field">
           <label for="key">Zotero API key</label>
           <input type="password" id="key" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
-          <p class="note">Needs write access. Stored in this browser only, sent only to api.zotero.org.</p>
+          <p class="note">Must allow <em>write</em> access. Saved in this browser only, and sent
+            only to api.zotero.org.</p>
         </div>
       </div>
       <div class="field">
-        <label for="mailto">Contact email</label>
+        <label for="mailto">Your email</label>
         <input type="email" id="mailto" placeholder="you@lab.org" autocomplete="off" spellcheck="false">
-        <p class="note">Identifies you to the Crossref and NCBI polite pools, which get you
-          higher rate limits. Not sent anywhere else.</p>
+        <p class="note">Identifies you to the Crossref and NCBI polite pools, which grant higher
+          rate limits and make the run faster. Not sent anywhere else.</p>
       </div>
-
-      <div class="danger">
-        <label class="switch">
-          <input type="checkbox" id="live">
-          <span class="txt">
-            <strong>Create items in my Zotero library</strong>
-            <span>Off by default. This is the only step that changes anything outside this
-              tab, so it has to be asked for. Existing items are reused, never duplicated.</span>
-          </span>
-        </label>
-      </div>
+      <p class="writes"><b>Every run adds items to your Zotero library.</b> Items already in your
+        library are reused and never duplicated, and only references that resolved are added.</p>
     </div>
-  </details>
-
-  <details class="panel">
-    <summary>Advanced <span class="hint">bibliography override · Semantic Scholar key</span></summary>
-    <div class="panel-body">
-      <div class="field">
-        <label for="biblio">Bibliography (optional)</label>
-        <textarea id="biblio" placeholder="1. Barro RJ, Sala-i-Martin X. Convergence. J Polit Econ. 1992;100(2):223-51.&#10;2. …"></textarea>
-        <p class="note">Only needed when the document has no “References” heading. Paste the
-          numbered list here and the document body is left intact below it.</p>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="s2">Semantic Scholar API key</label>
-          <input type="password" id="s2" placeholder="optional" autocomplete="off" spellcheck="false">
-          <p class="note">This provider stays off without a key — unauthenticated it rate-limits
-            to near-uselessness and slows the whole run. Free key from semanticscholar.org.</p>
-        </div>
-        <div class="field">
-          <label for="workers">Concurrent references</label>
-          <input type="text" id="workers" value="12" inputmode="numeric">
-          <p class="note">Per-provider rate limits are enforced separately; this only bounds how
-            much is queued at once.</p>
-        </div>
-      </div>
-    </div>
-  </details>
+  </section>
 
   <div class="actions">
-    <button class="go" id="go" disabled>Resolve references</button>
+    <button class="go" id="go" disabled>Resolve &amp; add to Zotero</button>
     <button class="ghost" id="cancel" hidden>Cancel</button>
-    <span class="mode" id="mode">mode <b>dry run</b> — nothing will be written</span>
+    <span class="mode" id="mode"></span>
   </div>
 
   <div id="err" class="err"><b>Stopped</b><span id="errMsg"></span></div>
@@ -469,13 +384,14 @@ footer a:hover{color:var(--amber)}
     </div>
 
     <div class="downloads" id="downloads"></div>
+    <p class="nextstep">Next: run ODF Scan in Zotero on the downloaded file.
+      <button id="helpOdfLink" type="button">Show me how</button></p>
 
     <div id="review">
       <h3 class="sec">Decide the unresolved ones</h3>
       <p class="rev-lede"><b id="revLede"></b> The accept gate is strict on purpose, so what
         reaches here is genuinely ambiguous rather than merely hard. Choose a match, paste a
-        DOI, or leave it flagged — then rebuild the document. Decisions last for this session
-        only.</p>
+        DOI, or leave it flagged — then rebuild. Decisions last for this session only.</p>
       <div id="cards"></div>
       <div class="rev-foot">
         <button class="go" id="apply" disabled>Apply &amp; rebuild</button>
@@ -510,10 +426,104 @@ footer a:hover{color:var(--amber)}
   <div id="log"></div>
 
   <footer>
-    <span>Runs entirely client-side. Crossref · PubMed · OpenAlex · Europe&nbsp;PMC · Semantic&nbsp;Scholar · Zotero</span>
-    <span>Next step after download: Zotero → Tools → ODF Scan</span>
+    <span>Runs entirely in your browser. Crossref · PubMed · OpenAlex · Europe&nbsp;PMC · Semantic&nbsp;Scholar · Zotero</span>
+    <span>Z-Link</span>
   </footer>
 </div>
+
+<!-- ── first-time help ──────────────────────────────────────────────────── -->
+<dialog id="help">
+  <div class="dlg-head">
+    <h2>Getting started</h2>
+    <button class="mini" id="helpClose">Close</button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tabKeys" role="tab" aria-selected="true" aria-controls="paneKeys">1 · Zotero key</button>
+    <button class="tab" id="tabOdf" role="tab" aria-selected="false" aria-controls="paneOdf">2 · ODF Scan</button>
+  </div>
+
+  <div class="dlg-body">
+    <div class="guide" id="paneKeys" role="tabpanel">
+      <h3>Get your userID and API key</h3>
+      <p>Z-Link needs these to put the references into your library. It takes about a minute,
+        and you only do it once — Z-Link remembers them in this browser.</p>
+      <ol>
+        <li>Go to <a href="https://www.zotero.org/user/login" target="_blank" rel="noopener noreferrer">zotero.org</a>
+          and sign in. If you don't have an account yet, create one — it's free.</li>
+        <li>Open <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener noreferrer">zotero.org/settings/keys</a>.
+          You can also reach it from <b>Settings → Security → Applications</b>.</li>
+        <li>Near the top you'll see a line reading <em>“Your userID for use in API calls is …”</em>
+          followed by a number. That number is your <b>userID</b> — copy it into Z-Link.
+          It is not your username or your email.</li>
+        <li>Click <b>Create new private key</b>.</li>
+        <li>Give it a name you'll recognise later, such as <code>Z-Link</code>.</li>
+        <li>Tick <b>Allow library access</b>, and — this is the one people miss — tick
+          <b>Allow write access</b> under Personal Library. Without write access Z-Link can read
+          your library but cannot add anything, and the run will stop with a 403.</li>
+        <li>Click <b>Save Key</b>.</li>
+        <li>Zotero shows the key <b>once</b>. Copy it now and paste it into Z-Link. If you lose it,
+          you can't view it again — just delete that key and create another.</li>
+      </ol>
+      <div class="callout"><b>Where the key is kept.</b> In this browser's local storage, on this
+        device. It is sent only to api.zotero.org, in a request header rather than a web address.
+        It is never sent to Z-Link's own site, because Z-Link has no server.</div>
+      <div class="callout warnout"><b>If you share this computer</b>, treat the key like a
+        password. You can revoke it at any time from the same settings page, and any key you
+        revoke stops working immediately.</div>
+    </div>
+
+    <div class="guide" id="paneOdf" role="tabpanel" hidden>
+      <h3>Install the ODF Scan plugin</h3>
+      <p>Z-Link gives you a .docx where every citation has been replaced by a Scannable Cite
+        marker — text like <code>{ | Marmot, (2005) | | |zu:1234567:ABCD1234}</code>. The ODF Scan
+        plugin is what turns those markers into real, live Zotero citations.</p>
+      <p>You only install it once. It needs <b>Zotero 7 or newer</b>.</p>
+      <ol>
+        <li>Download the plugin file from the
+          <a href="https://github.com/Juris-M/zotero-odf-scan-plugin/releases" target="_blank" rel="noopener noreferrer">ODF Scan releases page</a>.
+          You want the file ending in <code>.xpi</code>, for example
+          <code>zotero-odf-scan-v3.2.1.xpi</code>.</li>
+        <li><b>Right-click the link and choose “Save link as…”.</b> If you left-click it, your
+          browser may try to install it as a browser extension and report that it's corrupted —
+          it isn't, it just isn't a browser add-on. Save it to your Downloads folder.</li>
+        <li>Open Zotero on your computer.</li>
+        <li>Go to <b>Tools → Plugins</b>. (On older versions this menu is called Add-ons.)</li>
+        <li>Click the <b>gear icon ⚙</b> at the top right of the Plugins window, then choose
+          <b>Install Plugin From File…</b></li>
+        <li>Change the file filter to show all files if the .xpi is greyed out, select the
+          <code>.xpi</code> you downloaded, and click Open.</li>
+        <li>Restart Zotero if it asks. <b>ODF Scan for Zotero</b> should now be listed under
+          Plugins.</li>
+      </ol>
+
+      <h3>Run the scan on your document</h3>
+      <ol>
+        <li>Make sure the run finished and you downloaded the <b>Scannable manuscript</b> file
+          from Z-Link.</li>
+        <li>In Zotero, go to <b>Tools → ODF Scan</b>.</li>
+        <li>For <b>File type</b>, choose <b>ODF (to citations)</b> — that is the direction that
+          turns markers into live citations.</li>
+        <li>For <b>Input File</b>, click <b>Choose File…</b> and pick the .docx you downloaded
+          from Z-Link.</li>
+        <li>For <b>Output File</b>, choose where to save the converted document. Keep it separate
+          from the input so you still have the original if anything looks wrong.</li>
+        <li>Click <b>Next</b>, let it work, then <b>Finish</b>.</li>
+        <li>Open the output document. Your citations are now live Zotero citations, and you can
+          insert a bibliography and change citation style from Zotero's word-processor toolbar.</li>
+      </ol>
+      <div class="callout"><b>Anything marked <code>{NEEDS REVIEW: n}</code></b> is a reference
+        Z-Link could not confirm. Those stay as plain text on purpose — a visible gap is safer
+        than a confident link to the wrong paper. Use the review step on the results page to
+        decide them, then rebuild.</div>
+      <div class="callout"><b>Word or LibreOffice?</b> ODF Scan produces a document with live
+        citation fields. Zotero's word-processor plugin has to be installed for your editor for
+        those to be editable — that comes with Zotero itself, under
+        <b>Settings → Cite → Word Processors</b>.</div>
+    </div>
+  </div>
+
+  <div class="dlg-foot"><button class="go" id="helpDone">Got it</button></div>
+</dialog>
 
 <script type="module" src="./app.js"></script>
 </body>
