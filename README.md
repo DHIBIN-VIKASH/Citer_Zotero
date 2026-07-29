@@ -1,4 +1,4 @@
-# zotprep — plain-text citations → real, linked Zotero citations
+# Z-Link / zotprep — plain-text citations → real, linked Zotero citations
 
 Takes a manuscript with placeholder numbered citations (superscript `¹`, Lancet-style
 `¹·²⁻⁴`, or `[1]`, `(1)`, `[2,3]`, `[1-3]`) plus a plain numbered bibliography,
@@ -8,6 +8,21 @@ writes a `.docx` ready for Zotero's ODF Scan.
 It does not decide *where* a citation belongs — that's your judgment while
 writing. It automates everything after: finding each paper, verifying it's
 actually the right one, getting it into Zotero, and stamping the marker.
+
+There are two front ends over one engine:
+
+| | **Z-Link** (browser) | **zotprep** (command line) |
+|---|---|---|
+| Install | none | `pip install -r requirements.txt` |
+| Runs | entirely in your browser | on your machine |
+| Writes to Zotero | always | only with `--live` |
+| Preview without writing | no | yes, `--dry-run` is the default |
+| Review unresolved | click through the candidates | `--review` prompt |
+| Remembers decisions | for the session | forever, in SQLite |
+
+They share the matching engine, and the browser one is a verified port rather
+than a reimplementation — see [Verifying the browser
+port](#verifying-the-browser-port).
 
 Measured on two real manuscripts:
 
@@ -22,47 +37,134 @@ bibliography entries that the gate refused to guess at — see
 
 ---
 
-## Install
+## Z-Link — the browser version
+
+Nothing to install. Open the page, drop in a `.docx`, and it resolves the
+bibliography, adds the items to your Zotero library and gives you back the
+scannable document and a report.
+
+**Your manuscript never leaves the tab.** There is no server and no upload: the
+page talks to Crossref, OpenAlex, Europe PMC, PubMed, Semantic Scholar and the
+Zotero API directly from your browser, and every one of them permits that with
+`Access-Control-Allow-Origin: *`. The page loads no third-party script at all —
+even the `.docx` unzipping uses the browser's own Compression Streams — so there
+is nothing on it that *could* send your work anywhere.
+
+Your Zotero userID and API key are kept in that browser's local storage and sent
+only to `api.zotero.org`, in a request header rather than a web address. Enter
+them once. The **First time here** button walks through getting them, and
+through installing the ODF Scan plugin, which is downloadable from the app
+itself.
+
+Differences from the CLI, all deliberate:
+
+- **Every run writes to your library.** There is no dry-run mode. Credentials are
+  checked before any searching starts, so a wrong key fails in about two seconds
+  rather than after several minutes; existing items are matched on DOI and on
+  title+year and reused rather than duplicated; and only references that cleared
+  the accept gate become items at all.
+- **Only unresolved references go to review**, where `--review` also asks about
+  `from-reference-text` ones.
+- **Nothing persists but your credentials.** Review decisions last for the
+  session; the CLI writes them to SQLite forever.
+- **The bibliography must be under a heading** in the document. There is no
+  equivalent of `--bibliography`.
+
+---
+
+## Install (command line)
 
 ```bash
-pip install httpx rapidfuzz python-docx pyzotero
+pip install -r requirements.txt
 ```
 
-Python 3.11+. You also need the Zotero desktop app and the "ODF/DOCX Scan for
-Zotero" plugin for the final conversion step (one-time).
+Python 3.11+. You also need the Zotero desktop app (7.0+) and the ODF Scan
+plugin for the final conversion step — one-time, and covered under
+[Zotero setup](#zotero-setup).
 
 ---
 
 ## Quick start
 
-Dry run is the **default** — nothing reaches your Zotero library unless you pass
-`--live` explicitly:
+Save your credentials once. They go to `~/.zotprep/config.json`, created `0600`
+under your user profile:
 
 ```bash
-python -m zotprep --manuscript yourpaper.docx --mailto you@email.com
+python -m zotprep --zotero-userid 1234567 --zotero-key YOUR_KEY --mailto you@email.com --save-credentials
 ```
 
-Read `zot_out/report.csv`, then do the real run. Keep the API key out of your
-shell history by putting it in the environment:
+Every run after that is just the manuscript. Dry run is the **default** —
+nothing reaches your Zotero library unless you pass `--live` explicitly:
+
+```bash
+python -m zotprep --manuscript yourpaper.docx
+```
+
+Read `zot_out/report.csv`, then do the real run:
+
+```bash
+python -m zotprep --manuscript yourpaper.docx --live
+```
+
+Settings resolve highest-first: an explicit flag, then `$ZOTERO_USERID` /
+`$ZOTERO_KEY` / `$ZOTPREP_MAILTO`, then the saved file — so a stored credential
+never silently overrides one you asked for. `--show-config` prints where each
+value is coming from, with the key masked; `--forget-credentials` deletes the
+file.
+
+Prefer not to save at all? The environment still works:
 
 ```bash
 $env:ZOTERO_USERID = "1234567"; $env:ZOTERO_KEY = "your_key"
 ```
 
-```bash
-python -m zotprep --manuscript yourpaper.docx --live --mailto you@email.com
-```
-
-Get your numeric userID and a **read/write** API key once at
-https://www.zotero.org/settings/keys
-
-Then in Zotero: **Tools → ODF Scan → "Markers → Citations"**, input
-`zot_out/manuscript_scannable.docx`, pick an output path → Process Document.
-Open the result in Word → Zotero tab → Document Preferences → style →
-Add/Edit Bibliography.
+Avoid putting the key inline on a command line. It ends up in shell history, and
+on this project it also ended up in a tool's approved-commands log — which is
+exactly the sort of place a live key should not sit.
 
 Re-running `--live` is safe: items are matched by DOI and by title+year against
 your existing library and **reused, not duplicated**.
+
+---
+
+## Zotero setup
+
+### The userID and API key
+
+At https://www.zotero.org/settings/keys:
+
+1. Your **userID** is the number in *"Your userID for use in API calls is …"*.
+   It is not your username.
+2. **Create new private key**, tick **Allow library access** *and* **Allow write
+   access**. Without write access every run stops with an opaque `403`.
+3. The key is shown **once**. Copy it immediately; if you lose it, delete that
+   key and make another.
+
+Revoke a key any time from the same page — it stops working immediately.
+
+### The ODF Scan plugin
+
+Needs Zotero 7.0 or newer. The `.xpi` is bundled at
+[`web/vendor/`](web/vendor/) and downloadable from Z-Link's help panel, or from
+the [upstream releases page](https://github.com/Juris-M/zotero-odf-scan-plugin/releases).
+
+1. Save the `.xpi` to disk. If your browser offers to *install* it and then calls
+   it corrupt, it has mistaken it for a browser extension — right-click and
+   **Save link as…** instead.
+2. In Zotero: **Tools → Plugins** (called Add-ons on older versions).
+3. Gear icon ⚙ → **Install Plugin From File…**, pick the `.xpi`, restart if asked.
+
+### Running the scan
+
+1. **Tools → ODF Scan**
+2. File type: **ODF (to citations)** — the direction that turns markers into live
+   citations.
+3. **Input File**: `zot_out/manuscript_scannable.docx`. **Output File**: somewhere
+   else, so you keep the original.
+4. **Next**, then **Finish**.
+
+Open the result in your word processor → Zotero tab → Document Preferences →
+choose a style → Add/Edit Bibliography.
 
 ---
 
@@ -337,6 +439,22 @@ Every decision is written to the `corrections` table, so **the same reference
 never asks twice** — in this manuscript or any future one. A reference you fix
 once is permanently resolved.
 
+Z-Link shows the same candidates as cards after a run, with the same four
+outcomes and the same effect on each reference:
+
+| | result |
+|---|---|
+| pick a candidate | `ACCEPTED`, tier `manual`, confidence 1.0 |
+| paste a DOI | `ACCEPTED`, tier `manual`, confidence 1.0 |
+| build from the reference text | `FROM_TEXT`, tier `book-from-text`, confidence 0.80 |
+| leave flagged | unchanged — stays `{NEEDS REVIEW: n}` |
+
+Building from the reference text is offered only for book-shaped references,
+which is where the CLI offers `[b]`. A pasted DOI still goes through the Crossref
+enrichment step, so the item is built from the canonical record rather than the
+bare identifier — you supply the DOI, not the metadata. Web decisions last for
+the session only; the CLI's are permanent.
+
 ---
 
 ## Outputs
@@ -378,22 +496,80 @@ or changing whitespace/dashes/case still hits the cache. Disable with
 | `--manuscript FILE` | yes | `.docx` input |
 | `--bibliography FILE` | no | Separate reference-list file, if not under a "References" heading |
 | `--outdir DIR` | no | Output folder (default `zot_out`) |
-| `--mailto EMAIL` | no | Crossref/NCBI polite pool. Also `ZOTPREP_MAILTO` |
+| `--mailto EMAIL` | no | Crossref/NCBI polite pool. Also `$ZOTPREP_MAILTO`, or saved |
 | `--dry-run` | no | Resolve and report, create nothing. **This is the default** |
 | `--live` | to write | Create/reuse items in your Zotero library. Must be explicit — never implied |
-| `--zotero-userid ID` | with `--live` | Numeric userID. Defaults to `$ZOTERO_USERID` |
-| `--zotero-key KEY` | with `--live` | Read/write API key. Defaults to `$ZOTERO_KEY` |
+| `--zotero-userid ID` | with `--live` | Numeric userID. Also `$ZOTERO_USERID`, or saved |
+| `--zotero-key KEY` | with `--live` | Read/write API key. Also `$ZOTERO_KEY`, or saved |
 | `--review` | no | Prompt interactively for anything not auto-accepted |
 | `--workers N` | no | Concurrent references (default 12). Per-provider rate limits enforced separately |
 | `--no-cache` | no | Ignore and don't write the SQLite cache |
+| `--save-credentials` | no | Write the userID/key/mailto in use to `~/.zotprep/config.json` and stop asking |
+| `--forget-credentials` | no | Delete that file |
+| `--show-config` | no | Print where each setting comes from, key masked, then exit |
+
+`$ZOTPREP_CONFIG` overrides the config file location, which is what the tests
+use to avoid touching a real one.
+
+---
+
+## Verifying the browser port
+
+Rewriting a verified engine in another language risks silent behaviour drift, so
+that risk is measured rather than argued away:
+
+```bash
+python web/tools/parity/run_all.py
+```
+
+Two phases, and both matter.
+
+**Parity** compares each ported module against its Python original over a corpus
+and requires the identical IEEE-754 double — not a value within a tolerance. The
+accept gates are hard thresholds (0.88 / 0.90 / 0.92 / 0.93), so a last-bit
+difference is a behaviour difference.
+
+**Mutation** then injects known port mistakes one at a time and requires each to
+be caught. Parity passing alone proves nothing: three times during the port it
+reported a clean pass for code that was provably wrong, because the corpus never
+reached the relevant branch. Current score is **47/47 killable mutants killed**,
+with 6 documented as equivalent — each carrying the argument for why no test can
+kill it.
+
+Differences between the two languages that produced real bugs, all caught here:
+
+- `rapidfuzz` computes `(1 - d/l) * 100` in `ratio` but `100 - 100*d/l` in
+  `token_set_ratio` — algebraically equal, different doubles
+- Python's `len()` and `sorted()` work on code points, JavaScript's on UTF-16
+  code units
+- Python's `\w`, `\b` and `isupper()` are Unicode-aware; JavaScript's are ASCII
+- `str.replace` replaces every occurrence, `String.replace` replaces one
+- `format(x, ".2f")` rounds half to even, `toFixed` rounds half away from zero
+
+The `.docx` layer needs a DOM, so it has its own check against a fixture built by
+the Python original:
+
+```bash
+python web/tools/parity/docx_fixture.py
+python -m http.server 8731 --directory web
+# then open http://localhost:8731/tools/parity/docx_check.html
+```
+
+End to end, the same document through `python -m zotprep --dry-run --no-cache`
+and through the browser produces the same status, tier, confidence, DOI and title
+for every reference, the same rewritten-citation count, the same unresolved list,
+and the same advisory strings character for character.
+
+See [`web/README.md`](web/README.md) for the layout and for how to add cases.
 
 ---
 
 ## Module layout
 
 ```
-zotprep/
+zotprep/                  the engine and the CLI
   cli.py            arg parsing, end-to-end flow
+  config.py         saved credentials, and the flag/env/file precedence
   extractor.py      reference string -> ParsedRef (identifiers, title, journal, locator, book/chapter fields)
   models.py         ParsedRef, Candidate, Resolution
   resolver.py       orchestration, from-text fallback, advisories
@@ -407,11 +583,34 @@ zotprep/
     crossref.py  europepmc.py  pubmed.py  openalex.py  semanticscholar.py
   zotero/
     client.py       item building, duplicate detection, creation
+
+web/                      Z-Link: the browser build
+  index.html        the app, including the first-run help
+  app.js            UI wiring; credentials <-> localStorage
+  src/              the port — one file per zotprep module it mirrors,
+                    plus zip.js (Compression Streams) and pipeline.js
+  vendor/           the ODF Scan plugin .xpi, with its NOTICE
+  tools/parity/     the differential tests and the mutation check
+.github/workflows/pages.yml   runs parity, then deploys web/ to Pages
+
 database/cache.sqlite
 tests/
   refs_35.json      35-reference fixture
   run_35.py         accuracy harness
 ```
+
+---
+
+## Deploying Z-Link
+
+`.github/workflows/pages.yml` runs the parity suite on every push and publishes
+to GitHub Pages only if it passes, so a drifting engine cannot ship. It stages
+`index.html`, `app.js`, `src/` and `vendor/` — the parity harnesses stay out,
+since they are development tooling that depends on fixtures which are
+deliberately not committed.
+
+Enable it once under **Settings → Pages → Source: GitHub Actions**. The
+repository must be public for Pages on a free account.
 
 ---
 
@@ -429,6 +628,11 @@ tests/
   the identifier that matters for citation styles.
 - The parser is tuned for Vancouver and Lancet house style. Other formats may
   need one `--review` pass, after which they're cached forever.
+- Z-Link needs a browser with Compression Streams — Chrome/Edge 80+, Firefox
+  113+, Safari 16.4+. It says so up front rather than failing later.
+- Z-Link has no dry run and no correction store, so a manuscript reviewed and
+  then reloaded asks again. Use the CLI when you want a preview pass or
+  decisions that persist.
 
 ---
 
