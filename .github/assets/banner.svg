@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 260" width="880" height="260"
+     role="img" aria-label="Z-Link — plain-text citations become real, linked Zotero citations">
+<title>Z-Link — plain-text citations become real, linked Zotero citations</title>
+
+<!--
+  Self-hosted animated banner. No external service, no tracking pixel, nothing
+  that can rot: the animation is plain CSS inside the SVG, so GitHub's image
+  proxy serves it as bytes and the browser animates it.
+
+  Palette and type match the app itself — warm paper, ink, ochre signal, serif
+  and mono only. The card carries its own background so it reads the same on
+  GitHub's light and dark themes rather than half-vanishing on one of them.
+-->
+
+<defs>
+  <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%"  stop-color="#FBF8F1"/>
+    <stop offset="100%" stop-color="#F2ECDF"/>
+  </linearGradient>
+  <linearGradient id="sweepFade" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%"   stop-color="#C99A2E" stop-opacity="0"/>
+    <stop offset="45%"  stop-color="#C99A2E" stop-opacity=".85"/>
+    <stop offset="100%" stop-color="#C99A2E" stop-opacity="0"/>
+  </linearGradient>
+  <clipPath id="card"><rect x="0" y="0" width="880" height="260" rx="10"/></clipPath>
+</defs>
+
+<style>
+  .serif { font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif; }
+  .mono  { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace; }
+
+  /* one 9s loop; each row resolves in turn, then the whole thing repeats */
+  .row      { opacity: 0; animation: rowIn 9s ease-out infinite; }
+  .row-2    { animation-delay: .9s; }
+  .row-3    { animation-delay: 1.8s; }
+
+  .tick     { opacity: 0; transform-origin: center; animation: tickIn 9s ease-out infinite; }
+  .tick-1   { animation-delay: 1.55s; }
+  .tick-2   { animation-delay: 2.45s; }
+  .tick-3   { animation-delay: 3.35s; }
+
+  .resolved { opacity: 0; animation: rowIn 9s ease-out infinite; }
+  .res-1    { animation-delay: 1.45s; }
+  .res-2    { animation-delay: 2.35s; }
+  .res-3    { animation-delay: 3.25s; }
+
+  .sweep    { animation: sweep 9s cubic-bezier(.5,0,.3,1) infinite; }
+  .caret    { animation: blink 1.1s step-end infinite; }
+  .pip      { animation: pip 9s ease-out infinite; }
+  .pip-2    { animation-delay: .9s; }
+  .pip-3    { animation-delay: 1.8s; }
+
+  @keyframes rowIn {
+     0%    { opacity: 0; transform: translateX(-6px); }
+     6%    { opacity: 1; transform: translateX(0); }
+    88%    { opacity: 1; }
+    97%,100% { opacity: 0; }
+  }
+  @keyframes tickIn {
+     0%    { opacity: 0; transform: scale(.4); }
+     4%    { opacity: 1; transform: scale(1.18); }
+     7%    { opacity: 1; transform: scale(1); }
+    88%    { opacity: 1; transform: scale(1); }
+    97%,100% { opacity: 0; }
+  }
+  @keyframes sweep {
+     0%    { transform: translateX(-260px); opacity: 0; }
+     6%    { opacity: 1; }
+    42%   { transform: translateX(560px); opacity: 1; }
+    52%,100% { transform: translateX(560px); opacity: 0; }
+  }
+  @keyframes pip {
+     0%,3% { r: 0;   opacity: 0; }
+     8%    { r: 3.4; opacity: 1; }
+    88%    { r: 3.4; opacity: 1; }
+    97%,100% { r: 3.4; opacity: 0; }
+  }
+  @keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+
+  /* respect the reader's motion preference */
+  @media (prefers-reduced-motion: reduce) {
+    .row, .tick, .resolved, .sweep, .caret, .pip { animation: none; opacity: 1; }
+    .sweep { opacity: 0; }
+  }
+</style>
+
+<g clip-path="url(#card)">
+  <rect width="880" height="260" fill="url(#paper)"/>
+  <!-- faint ruled-paper lines -->
+  <g stroke="#E3DBCA" stroke-width="1">
+    <line x1="0" y1="64"  x2="880" y2="64"/>
+    <line x1="0" y1="196" x2="880" y2="196"/>
+  </g>
+  <rect x="0" y="0" width="4" height="260" fill="#C99A2E"/>
+</g>
+<rect x=".5" y=".5" width="879" height="259" rx="10" fill="none" stroke="#DDD5C4"/>
+
+<!-- ── wordmark ─────────────────────────────────────────────────────────── -->
+<text class="serif" x="44" y="112" font-size="62" fill="#23201C" letter-spacing="-2">
+  <tspan fill="#C99A2E">Z</tspan>-Link<tspan class="caret" fill="#C99A2E" dx="4">.</tspan>
+</text>
+<text class="mono" x="47" y="141" font-size="11.5" fill="#8A8172" letter-spacing="3.4">
+  REFERENCE RESOLVER FOR ZOTERO
+</text>
+<text class="serif" x="46" y="176" font-size="16.5" fill="#5A5347" font-style="italic">
+  Plain-text citations → real, linked Zotero citations.
+</text>
+<text class="mono" x="47" y="216" font-size="11" fill="#8A8172" letter-spacing=".6">
+  5 indexes · 82/82 resolved · runs entirely in your browser
+</text>
+
+<!-- sweeping scan line, the "resolving" beat -->
+<g clip-path="url(#card)">
+  <rect class="sweep" x="440" y="34" width="240" height="192" fill="url(#sweepFade)" opacity=".14"/>
+</g>
+
+<!-- ── the transformation ───────────────────────────────────────────────── -->
+<g transform="translate(474,52)">
+
+  <text class="mono" x="0" y="0" font-size="9.5" fill="#A79C89" letter-spacing="2.2">MANUSCRIPT</text>
+  <text class="mono" x="196" y="0" font-size="9.5" fill="#A79C89" letter-spacing="2.2">ZOTERO</text>
+
+  <!-- row 1 -->
+  <g class="row">
+    <circle class="pip" cx="4" cy="27" r="3.4" fill="#C99A2E"/>
+    <text class="serif" x="18" y="31" font-size="14" fill="#3D372F">widely.</text>
+    <text class="serif" x="66" y="25" font-size="11" fill="#C99A2E">1</text>
+  </g>
+  <g class="resolved res-1">
+    <path d="M150 27 L182 27" stroke="#C9BFAA" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <path d="M178 23 L183 27 L178 31" fill="none" stroke="#C9BFAA" stroke-width="1.2"/>
+    <text class="mono" x="196" y="31" font-size="10.5" fill="#4A6B33">Barro 1992</text>
+  </g>
+  <g class="tick tick-1" transform="translate(292,27)">
+    <circle r="7.5" fill="#EDF1E4" stroke="#A9BE92"/>
+    <path d="M-3.4 0 L-1 2.6 L3.6 -2.8" fill="none" stroke="#4A6B33" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- row 2 -->
+  <g class="row row-2">
+    <circle class="pip pip-2" cx="4" cy="63" r="3.4" fill="#C99A2E"/>
+    <text class="serif" x="18" y="67" font-size="14" fill="#3D372F">disagree.</text>
+    <text class="serif" x="82" y="61" font-size="11" fill="#C99A2E">2–4</text>
+  </g>
+  <g class="resolved res-2">
+    <path d="M150 63 L182 63" stroke="#C9BFAA" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <path d="M178 59 L183 63 L178 67" fill="none" stroke="#C9BFAA" stroke-width="1.2"/>
+    <text class="mono" x="196" y="67" font-size="10.5" fill="#4A6B33">Marmot 2005</text>
+  </g>
+  <g class="tick tick-2" transform="translate(292,63)">
+    <circle r="7.5" fill="#EDF1E4" stroke="#A9BE92"/>
+    <path d="M-3.4 0 L-1 2.6 L3.6 -2.8" fill="none" stroke="#4A6B33" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- row 3 — the one it refuses to guess at -->
+  <g class="row row-3">
+    <circle class="pip pip-3" cx="4" cy="99" r="3.4" fill="#B4462F"/>
+    <text class="serif" x="18" y="103" font-size="14" fill="#3D372F">systems.</text>
+    <text class="serif" x="74" y="97" font-size="11" fill="#B4462F">9</text>
+  </g>
+  <g class="resolved res-3">
+    <path d="M150 99 L182 99" stroke="#C9BFAA" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <path d="M178 95 L183 99 L178 103" fill="none" stroke="#C9BFAA" stroke-width="1.2"/>
+    <text class="mono" x="196" y="103" font-size="10.5" fill="#B4462F">NEEDS REVIEW</text>
+  </g>
+  <g class="tick tick-3" transform="translate(292,99)">
+    <circle r="7.5" fill="#FAE9E4" stroke="#DFB3A7"/>
+    <text class="mono" x="0" y="3.4" font-size="10" fill="#B4462F" text-anchor="middle">?</text>
+  </g>
+
+  <text class="mono" x="0" y="140" font-size="9.5" fill="#A79C89" letter-spacing=".3" font-style="italic">
+    never a live citation pointing at the wrong paper
+  </text>
+</g>
+</svg>
