@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zotprep — reference resolver</title>
+<meta name="description" content="Resolve a manuscript's bibliography against Crossref, PubMed, OpenAlex, Europe PMC and Semantic Scholar, and prepare a Zotero-linked .docx. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2314120F'/><path d='M8 9h16M8 16h16M8 23h10' stroke='%23E0A82E' stroke-width='2.5' stroke-linecap='round'/></svg>">
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   zotprep — "laboratory instrument" : warm ink, ruled paper, amber signal.
+   Serif + mono only. No grotesque, no third-party fonts, no external requests
+   of any kind: a manuscript is unpublished work and nothing here should be
+   able to phone home.
+   ───────────────────────────────────────────────────────────────────────── */
+:root{
+  --ink:#0E0D0B;
+  --ink-2:#14120F;
+  --panel:#1A1815;
+  --panel-2:#211E1A;
+  --rule:#2E2A24;
+  --rule-bright:#403A31;
+  --paper:#EDE7DA;
+  --paper-dim:#B3AB9B;
+  --paper-faint:#7D7566;
+  --amber:#E0A82E;
+  --amber-dim:#8A6A20;
+  --sage:#8CA86A;
+  --terra:#D0705A;
+  --slate:#7B9DB0;
+  --violet:#A98BC4;
+
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua','Hoefler Text',Georgia,serif;
+  --mono:'Cascadia Code','JetBrains Mono','IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+
+  --pad:clamp(1rem,3.2vw,2.75rem);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--serif);
+  background:var(--ink);
+  color:var(--paper);
+  line-height:1.55;
+  min-height:100vh;
+  overflow-x:hidden;
+  /* warm vignette + a faint horizon glow behind the masthead */
+  background-image:
+    radial-gradient(120% 70% at 50% -10%, rgba(224,168,46,.10), transparent 60%),
+    radial-gradient(90% 60% at 100% 100%, rgba(123,157,176,.05), transparent 70%);
+  background-attachment:fixed;
+}
+/* film grain — keeps the flat dark from looking like a default page */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.16;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  mix-blend-mode:overlay;
+}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--pad) var(--pad) 5rem}
+
+/* ── masthead ───────────────────────────────────────────────────────────── */
+header{
+  border-bottom:1px solid var(--rule);
+  padding-bottom:1.6rem;margin-bottom:2.5rem;
+  display:grid;grid-template-columns:1fr auto;gap:1.5rem;align-items:end;
+  animation:rise .7s cubic-bezier(.2,.7,.3,1) both;
+}
+.brand{display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap}
+h1{
+  font-size:clamp(2.4rem,6vw,4rem);font-weight:400;letter-spacing:-.03em;line-height:.92;
+  font-feature-settings:"liga" 1;
+}
+h1 .dot{color:var(--amber)}
+.tagline{
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--paper-faint);
+}
+.sub{color:var(--paper-dim);font-size:1.02rem;max-width:56ch;margin-top:.7rem;font-style:italic}
+.privacy{
+  font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--paper-faint);text-align:right;line-height:1.9;white-space:nowrap;
+}
+.privacy b{color:var(--sage);font-weight:400}
+
+/* ── dropzone : a specimen tray with corner ticks ───────────────────────── */
+.tray{
+  position:relative;border:1px solid var(--rule);background:var(--panel);
+  padding:clamp(2rem,6vw,4.25rem) 1.5rem;text-align:center;cursor:pointer;
+  transition:border-color .25s,background .25s,transform .25s;
+  animation:rise .7s .08s cubic-bezier(.2,.7,.3,1) both;
+}
+.tray::before,.tray::after{
+  content:'';position:absolute;width:14px;height:14px;border:1px solid var(--amber-dim);
+  transition:border-color .25s,width .25s,height .25s;
+}
+.tray::before{top:9px;left:9px;border-right:0;border-bottom:0}
+.tray::after{bottom:9px;right:9px;border-left:0;border-top:0}
+.tray:hover,.tray:focus-visible{border-color:var(--rule-bright);background:var(--panel-2);outline:none}
+.tray:hover::before,.tray:hover::after{width:22px;height:22px;border-color:var(--amber)}
+.tray.over{border-color:var(--amber);background:#231F17;transform:scale(.994)}
+.tray.over::before,.tray.over::after{width:28px;height:28px;border-color:var(--amber)}
+.tray.loaded{border-color:var(--amber-dim);border-style:solid}
+.tray h2{font-size:clamp(1.3rem,3vw,1.85rem);font-weight:400;letter-spacing:-.015em}
+.tray p{color:var(--paper-faint);font-size:.9rem;margin-top:.5rem}
+.tray .glyph{
+  font-family:var(--mono);font-size:2rem;color:var(--amber);display:block;margin-bottom:.85rem;
+  letter-spacing:.1em;
+}
+.filename{font-family:var(--mono);font-size:.86rem;color:var(--amber);word-break:break-all}
+.filesize{font-family:var(--mono);font-size:.72rem;color:var(--paper-faint);margin-top:.3rem}
+
+/* ── panels ─────────────────────────────────────────────────────────────── */
+details.panel{
+  border:1px solid var(--rule);border-top:0;background:var(--panel);
+  animation:rise .7s .14s cubic-bezier(.2,.7,.3,1) both;
+}
+details.panel > summary{
+  list-style:none;cursor:pointer;padding:.95rem 1.25rem;
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--paper-dim);display:flex;align-items:center;gap:.7rem;user-select:none;
+  transition:color .2s,background .2s;
+}
+details.panel > summary::-webkit-details-marker{display:none}
+details.panel > summary:hover{color:var(--paper);background:var(--panel-2)}
+details.panel > summary::before{content:'+';color:var(--amber);font-size:.95rem;line-height:1}
+details.panel[open] > summary::before{content:'−'}
+details.panel > summary .hint{
+  margin-left:auto;color:var(--paper-faint);letter-spacing:.08em;text-transform:none;
+  font-size:.68rem;
+}
+.panel-body{padding:.4rem 1.25rem 1.5rem;border-top:1px dashed var(--rule)}
+
+.field{margin-top:1.15rem}
+.field label{
+  display:block;font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--paper-faint);margin-bottom:.4rem;
+}
+.field .note{font-size:.83rem;color:var(--paper-faint);margin-top:.4rem;font-style:italic;line-height:1.5}
+input[type=text],input[type=password],input[type=email],textarea{
+  width:100%;background:var(--ink-2);border:1px solid var(--rule);color:var(--paper);
+  font-family:var(--mono);font-size:.86rem;padding:.62rem .75rem;border-radius:0;
+  transition:border-color .2s,background .2s;
+}
+input:focus,textarea:focus{outline:none;border-color:var(--amber);background:#100E0B}
+input::placeholder,textarea::placeholder{color:#5A5348}
+textarea{resize:vertical;min-height:7rem;line-height:1.5;font-size:.8rem}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1.15rem}
+
+/* live-write switch */
+.danger{
+  margin-top:1.4rem;border:1px solid var(--rule);border-left:2px solid var(--terra);
+  padding:1rem 1.15rem;background:#1E1613;
+}
+.switch{display:flex;align-items:flex-start;gap:.8rem;cursor:pointer}
+.switch input{appearance:none;margin:0;flex:0 0 auto;width:38px;height:21px;border-radius:11px;
+  background:var(--rule);border:1px solid var(--rule-bright);position:relative;cursor:pointer;
+  transition:background .22s,border-color .22s;margin-top:.15rem}
+.switch input::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;
+  border-radius:50%;background:var(--paper-faint);transition:transform .22s,background .22s}
+.switch input:checked{background:#4A2B22;border-color:var(--terra)}
+.switch input:checked::after{transform:translateX(17px);background:var(--terra)}
+.switch input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.switch .txt strong{display:block;font-size:.98rem;font-weight:400}
+.switch .txt span{font-size:.84rem;color:var(--paper-faint);font-style:italic}
+
+/* ── action bar ─────────────────────────────────────────────────────────── */
+.actions{
+  display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1.75rem;
+  animation:rise .7s .2s cubic-bezier(.2,.7,.3,1) both;
+}
+button{font-family:var(--mono);cursor:pointer;border-radius:0;transition:all .2s}
+.go{
+  background:var(--amber);color:#17130A;border:1px solid var(--amber);
+  padding:.85rem 2.1rem;font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;
+  position:relative;overflow:hidden;
+}
+.go:hover:not(:disabled){background:#F0BC4B;border-color:#F0BC4B;transform:translateY(-1px)}
+.go:active:not(:disabled){transform:translateY(0)}
+.go:disabled{opacity:.35;cursor:not-allowed}
+.ghost{
+  background:transparent;color:var(--paper-dim);border:1px solid var(--rule);
+  padding:.85rem 1.5rem;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;
+}
+.ghost:hover{border-color:var(--paper-faint);color:var(--paper)}
+.mode{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;color:var(--paper-faint)}
+.mode b{color:var(--sage);font-weight:400}
+.mode b.hot{color:var(--terra)}
+
+/* ── progress ───────────────────────────────────────────────────────────── */
+#progress{display:none;margin-top:2.25rem;border:1px solid var(--rule);background:var(--panel);padding:1.35rem 1.4rem}
+#progress.on{display:block;animation:rise .45s cubic-bezier(.2,.7,.3,1) both}
+.stage{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap}
+.stage .what{font-size:1.06rem}
+.stage .what::after{content:'';display:inline-block;width:.6em;text-align:left;animation:dots 1.4s steps(4,end) infinite}
+.stage .count{font-family:var(--mono);font-size:.78rem;color:var(--amber);letter-spacing:.08em}
+.bar{height:2px;background:var(--rule);margin-top:1rem;overflow:hidden;position:relative}
+.bar i{display:block;height:100%;width:0;background:var(--amber);transition:width .35s cubic-bezier(.4,0,.2,1)}
+.bar.indet i{width:35%;animation:sweep 1.5s cubic-bezier(.4,0,.6,1) infinite}
+
+/* ── results ────────────────────────────────────────────────────────────── */
+#results{display:none;margin-top:2.75rem}
+#results.on{display:block}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.tile{background:var(--panel);padding:1.35rem 1.25rem}
+.tile .n{font-family:var(--mono);font-size:2.1rem;line-height:1;letter-spacing:-.04em}
+.tile .k{font-family:var(--mono);font-size:.63rem;letter-spacing:.18em;text-transform:uppercase;color:var(--paper-faint);margin-top:.6rem}
+.tile.ok .n{color:var(--sage)} .tile.warn .n{color:var(--terra)} .tile.acc .n{color:var(--amber)}
+
+.downloads{display:flex;gap:1rem;flex-wrap:wrap;margin-top:1.75rem}
+.dl{
+  display:flex;align-items:center;gap:.85rem;text-decoration:none;color:var(--paper);
+  border:1px solid var(--rule);background:var(--panel);padding:.9rem 1.35rem;transition:all .2s;
+}
+.dl:hover{border-color:var(--amber);background:var(--panel-2);transform:translateY(-1px)}
+.dl .ic{font-family:var(--mono);color:var(--amber);font-size:1.15rem}
+.dl .t{font-size:.98rem;line-height:1.25}
+.dl .s{font-family:var(--mono);font-size:.66rem;color:var(--paper-faint);letter-spacing:.1em;text-transform:uppercase}
+
+h3.sec{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--paper-faint);margin:2.5rem 0 .9rem;font-weight:400;
+  display:flex;align-items:center;gap:.9rem;
+}
+h3.sec::after{content:'';flex:1;height:1px;background:var(--rule)}
+
+.notes{border:1px solid var(--rule);border-left:2px solid var(--amber);background:var(--panel);padding:1.1rem 1.3rem}
+.notes p{font-size:.92rem;margin:.55rem 0;color:var(--paper-dim)}
+.notes p:first-child{margin-top:0} .notes p:last-child{margin-bottom:0}
+.notes .num{font-family:var(--mono);color:var(--amber);font-size:.8rem}
+
+.tablewrap{border:1px solid var(--rule);overflow-x:auto;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:720px}
+th{
+  font-family:var(--mono);font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--paper-faint);text-align:left;font-weight:400;padding:.8rem 1rem;
+  border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--panel-2);
+}
+td{padding:.72rem 1rem;border-bottom:1px solid var(--rule);vertical-align:top;font-size:.93rem}
+tr:last-child td{border-bottom:0}
+tbody tr{transition:background .15s}
+tbody tr:hover{background:var(--panel-2)}
+td.n{font-family:var(--mono);color:var(--paper-faint);font-size:.82rem;width:3rem;text-align:right}
+td.ttl{max-width:34rem}
+td.ttl .why{display:block;font-size:.82rem;color:var(--paper-faint);font-style:italic;margin-top:.25rem}
+td.doi{font-family:var(--mono);font-size:.74rem;color:var(--paper-faint);word-break:break-all;max-width:15rem}
+.badge{
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.13em;text-transform:uppercase;
+  padding:.24rem .6rem;border:1px solid;white-space:nowrap;display:inline-block;
+}
+.b-acc{color:var(--sage);border-color:#3D4A2E;background:#1B2015}
+.b-txt{color:var(--slate);border-color:#2C3D46;background:#151C20}
+.b-rev{color:var(--terra);border-color:#4A2B22;background:#201411}
+.tier{font-family:var(--mono);font-size:.66rem;color:var(--paper-faint);letter-spacing:.06em}
+
+/* ── review ─────────────────────────────────────────────────────────────── */
+#review{display:none;margin-top:2.75rem}
+#review.on{display:block;animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
+.rev-lede{
+  border:1px solid var(--rule);border-left:2px solid var(--amber);background:var(--panel);
+  padding:1.1rem 1.3rem;color:var(--paper-dim);font-size:.95rem;
+}
+.rev-lede b{color:var(--paper);font-weight:400}
+.card{border:1px solid var(--rule);background:var(--panel);margin-top:1.25rem}
+.card.done{border-color:var(--rule);opacity:.72}
+.card.done:hover{opacity:1}
+.card > header{
+  padding:1rem 1.25rem;border-bottom:1px dashed var(--rule);display:flex;gap:1rem;align-items:flex-start;
+}
+.card .idx{
+  font-family:var(--mono);color:var(--amber);font-size:.8rem;flex:0 0 auto;
+  border:1px solid var(--amber-dim);padding:.1rem .5rem;line-height:1.5;
+}
+.card .raw{font-size:.95rem;line-height:1.5}
+.card .why{
+  display:block;font-family:var(--mono);font-size:.72rem;color:var(--terra);
+  margin-top:.45rem;letter-spacing:.02em;
+}
+.card-body{padding:1.1rem 1.25rem}
+.opt{
+  display:block;border:1px solid var(--rule);background:var(--ink-2);padding:.85rem 1rem;
+  margin-bottom:.7rem;cursor:pointer;transition:border-color .18s,background .18s;
+}
+.opt:hover{border-color:var(--rule-bright);background:#17150F}
+.opt.sel{border-color:var(--amber);background:#221D12}
+.opt .ot{font-size:.95rem;line-height:1.4}
+.opt .om{
+  font-family:var(--mono);font-size:.7rem;color:var(--paper-faint);margin-top:.45rem;
+  display:flex;flex-wrap:wrap;gap:.3rem .9rem;
+}
+.opt .om b{color:var(--paper-dim);font-weight:400}
+.opt .om .pv{color:var(--slate)}
+.opt .cur{
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--amber);border:1px solid var(--amber-dim);padding:.1rem .4rem;margin-left:.5rem;
+}
+.none{font-style:italic;color:var(--paper-faint);font-size:.92rem;margin-bottom:.9rem}
+.rev-actions{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:.4rem}
+.mini{
+  background:transparent;color:var(--paper-dim);border:1px solid var(--rule);
+  padding:.5rem 1rem;font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+}
+.mini:hover{border-color:var(--paper-faint);color:var(--paper)}
+.mini.on{border-color:var(--amber);color:var(--amber)}
+.doi-row{display:none;gap:.5rem;margin-top:.7rem;width:100%}
+.doi-row.on{display:flex}
+.doi-row input{flex:1}
+.verdict{
+  font-family:var(--mono);font-size:.74rem;color:var(--sage);letter-spacing:.02em;
+  display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;
+}
+.verdict.skip{color:var(--paper-faint)}
+.rev-foot{
+  display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1.75rem;
+  padding-top:1.5rem;border-top:1px solid var(--rule);
+}
+.rev-count{font-family:var(--mono);font-size:.72rem;color:var(--paper-faint);letter-spacing:.1em}
+.rev-count b{color:var(--amber);font-weight:400}
+
+/* ── log ────────────────────────────────────────────────────────────────── */
+#log{
+  font-family:var(--mono);font-size:.75rem;line-height:1.75;color:var(--paper-faint);
+  background:var(--ink-2);border:1px solid var(--rule);padding:1rem 1.15rem;
+  max-height:16rem;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
+}
+#log .warn{color:var(--terra)}
+#log .info{color:var(--paper-dim)}
+#log:empty{display:none}
+
+.err{
+  border:1px solid var(--terra);border-left-width:2px;background:#1E1411;
+  padding:1.1rem 1.3rem;margin-top:1.75rem;color:var(--paper);display:none;
+}
+.err.on{display:block;animation:rise .4s cubic-bezier(.2,.7,.3,1) both}
+.err b{color:var(--terra);font-weight:400;display:block;font-family:var(--mono);font-size:.68rem;
+  letter-spacing:.18em;text-transform:uppercase;margin-bottom:.5rem}
+
+footer{
+  margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:.68rem;color:var(--paper-faint);line-height:2;
+  display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;
+}
+footer a{color:var(--paper-dim)}
+footer a:hover{color:var(--amber)}
+
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(386%)}}
+@keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+@media (max-width:640px){
+  header{grid-template-columns:1fr}
+  .privacy{text-align:left}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="brand">
+        <h1>zotprep<span class="dot">.</span></h1>
+        <span class="tagline">v5 · browser build</span>
+      </div>
+      <p class="sub">Resolves a manuscript's bibliography against five indexes, then hands back a
+        Scannable&nbsp;Cite&nbsp;.docx ready for Zotero's ODF Scan.</p>
+    </div>
+    <div class="privacy">
+      <b>your manuscript never leaves this tab</b><br>
+      no server · no upload · no tracking<br>
+      <span id="engineNote">engine verified against the Python original</span>
+    </div>
+  </header>
+
+  <div class="tray" id="tray" tabindex="0" role="button"
+       aria-label="Choose or drop a .docx manuscript">
+    <span class="glyph">[ ]</span>
+    <h2 id="trayTitle">Drop your manuscript here</h2>
+    <p id="trayHint">a .docx with a “References” heading — or click to choose</p>
+  </div>
+  <input type="file" id="file" accept=".docx" hidden>
+
+  <details class="panel" id="settings">
+    <summary>Zotero &amp; contact <span class="hint" id="credHint">not set</span></summary>
+    <div class="panel-body">
+      <div class="row">
+        <div class="field">
+          <label for="uid">Zotero userID</label>
+          <input type="text" id="uid" placeholder="1234567" inputmode="numeric" autocomplete="off" spellcheck="false">
+          <p class="note">The <em>number</em> on zotero.org/settings/keys — not your username.</p>
+        </div>
+        <div class="field">
+          <label for="key">Zotero API key</label>
+          <input type="password" id="key" placeholder="••••••••••••••••" autocomplete="off" spellcheck="false">
+          <p class="note">Needs write access. Stored in this browser only, sent only to api.zotero.org.</p>
+        </div>
+      </div>
+      <div class="field">
+        <label for="mailto">Contact email</label>
+        <input type="email" id="mailto" placeholder="you@lab.org" autocomplete="off" spellcheck="false">
+        <p class="note">Identifies you to the Crossref and NCBI polite pools, which get you
+          higher rate limits. Not sent anywhere else.</p>
+      </div>
+
+      <div class="danger">
+        <label class="switch">
+          <input type="checkbox" id="live">
+          <span class="txt">
+            <strong>Create items in my Zotero library</strong>
+            <span>Off by default. This is the only step that changes anything outside this
+              tab, so it has to be asked for. Existing items are reused, never duplicated.</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  </details>
+
+  <details class="panel">
+    <summary>Advanced <span class="hint">bibliography override · Semantic Scholar key</span></summary>
+    <div class="panel-body">
+      <div class="field">
+        <label for="biblio">Bibliography (optional)</label>
+        <textarea id="biblio" placeholder="1. Barro RJ, Sala-i-Martin X. Convergence. J Polit Econ. 1992;100(2):223-51.&#10;2. …"></textarea>
+        <p class="note">Only needed when the document has no “References” heading. Paste the
+          numbered list here and the document body is left intact below it.</p>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="s2">Semantic Scholar API key</label>
+          <input type="password" id="s2" placeholder="optional" autocomplete="off" spellcheck="false">
+          <p class="note">This provider stays off without a key — unauthenticated it rate-limits
+            to near-uselessness and slows the whole run. Free key from semanticscholar.org.</p>
+        </div>
+        <div class="field">
+          <label for="workers">Concurrent references</label>
+          <input type="text" id="workers" value="12" inputmode="numeric">
+          <p class="note">Per-provider rate limits are enforced separately; this only bounds how
+            much is queued at once.</p>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <div class="actions">
+    <button class="go" id="go" disabled>Resolve references</button>
+    <button class="ghost" id="cancel" hidden>Cancel</button>
+    <span class="mode" id="mode">mode <b>dry run</b> — nothing will be written</span>
+  </div>
+
+  <div id="err" class="err"><b>Stopped</b><span id="errMsg"></span></div>
+
+  <div id="progress">
+    <div class="stage">
+      <span class="what" id="stage">working</span>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="bar indet" id="bar"><i></i></div>
+  </div>
+
+  <div id="results">
+    <div class="tiles">
+      <div class="tile"><div class="n" id="tTotal">0</div><div class="k">references</div></div>
+      <div class="tile ok"><div class="n" id="tOk">0</div><div class="k">resolved</div></div>
+      <div class="tile warn"><div class="n" id="tRev">0</div><div class="k">need review</div></div>
+      <div class="tile acc"><div class="n" id="tMark">0</div><div class="k">citations rewritten</div></div>
+    </div>
+
+    <div class="downloads" id="downloads"></div>
+
+    <div id="review">
+      <h3 class="sec">Decide the unresolved ones</h3>
+      <p class="rev-lede"><b id="revLede"></b> The accept gate is strict on purpose, so what
+        reaches here is genuinely ambiguous rather than merely hard. Choose a match, paste a
+        DOI, or leave it flagged — then rebuild the document. Decisions last for this session
+        only.</p>
+      <div id="cards"></div>
+      <div class="rev-foot">
+        <button class="go" id="apply" disabled>Apply &amp; rebuild</button>
+        <button class="ghost" id="skipAll">Leave the rest flagged</button>
+        <span class="rev-count" id="revCount"></span>
+      </div>
+    </div>
+
+    <div id="adviceWrap" hidden>
+      <h3 class="sec">Entries to verify</h3>
+      <div class="notes" id="advice"></div>
+    </div>
+
+    <div id="warnWrap" hidden>
+      <h3 class="sec">In-text citation problems — document left unchanged at these spots</h3>
+      <div class="notes" id="warns"></div>
+    </div>
+
+    <h3 class="sec">Every reference</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th style="width:3rem">#</th><th style="width:8rem">Status</th>
+          <th>Resolved to</th><th style="width:9rem">Tier</th><th style="width:12rem">Identifier</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <h3 class="sec" id="logHead" hidden>Run log</h3>
+  <div id="log"></div>
+
+  <footer>
+    <span>Runs entirely client-side. Crossref · PubMed · OpenAlex · Europe&nbsp;PMC · Semantic&nbsp;Scholar · Zotero</span>
+    <span>Next step after download: Zotero → Tools → ODF Scan</span>
+  </footer>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

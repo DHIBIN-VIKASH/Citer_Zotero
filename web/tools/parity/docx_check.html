@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zotprep — docx parity check</title>
+<style>
+  body{background:#0E0D0B;color:#EDE7DA;font:14px/1.6 'Cascadia Code',ui-monospace,Consolas,monospace;
+       margin:0;padding:2rem;max-width:1100px}
+  h1{font:400 1.6rem/1.2 'Iowan Old Style','Palatino Linotype',Georgia,serif;margin:0 0 .4rem}
+  p.lede{color:#8C8578;font:italic 400 13px/1.6 'Iowan Old Style',Georgia,serif;margin:0 0 1.6rem;max-width:70ch}
+  #v{font-size:1.05rem;padding:.7rem 1rem;border:1px solid #2E2A24;display:inline-block;margin-bottom:1.2rem}
+  .pass{color:#8CA86A;border-color:#3D4A2E!important;background:#1B2015}
+  .fail{color:#D0705A;border-color:#4A2B22!important;background:#201411}
+  .run{color:#E0A82E;border-color:#8A6A20!important}
+  pre{white-space:pre-wrap;word-break:break-word;background:#14120F;border:1px solid #2E2A24;
+      padding:1rem;color:#B3AB9B;font-size:12.5px}
+  b{color:#E0A82E;font-weight:400}
+</style>
+</head>
+<body>
+<h1>docx parity check</h1>
+<p class="lede">Runs the browser port of docx_writer.py over a fixture built by the Python
+original, and compares bibliography parsing, every rewritten paragraph, the marker count and
+the range warnings. Also re-opens the saved file to confirm the ZIP round-trips.
+Needs a DOM, so it lives in a page rather than in run_all.py.</p>
+
+<p>First: <b>python web/tools/parity/docx_fixture.py</b>, then serve <b>web/</b> and open this page.</p>
+
+<div id="v" class="run">running…</div>
+<pre id="out"></pre>
+
+<script type="module">
+const v = document.getElementById('v');
+const out = document.getElementById('out');
+const say = (s) => { out.textContent += s + '\n'; };
+
+try {
+  const docx = await import('../../src/docx.js');
+  const expect = await (await fetch('../../fixture.expect.json')).json();
+  const buf = await (await fetch('../../fixture.docx')).arrayBuffer();
+
+  const doc = await docx.Document.load(buf);
+  const idx = docx.findBiblioIndex(doc);
+  const biblio = doc.paragraphs.slice(idx + 1).map((p) => p.text).join('\n');
+  const raw = docx.parseBibliography(biblio);
+
+  // Same stubs as docx_fixture.py: reference 6 is left unresolved so the
+  // "{NEEDS REVIEW}" branch runs alongside the live-marker one.
+  const resolutions = new Map();
+  const keys = new Map();
+  for (const n of raw.keys()) {
+    const status = n === 6 ? 'REVIEW' : 'ACCEPTED';
+    resolutions.set(n, {
+      status,
+      candidate: status === 'REVIEW' ? null : {
+        year: 1990 + n,
+        corporate: n === 4 ? 'GBD 2021 Collaborators' : null,
+        authors: [`surname${n}`],
+      },
+    });
+    if (n !== 6) keys.set(n, `KEY${String(n).padStart(3, '0')}`);
+  }
+
+  const warnings = [];
+  const render = docx.makeRenderer(resolutions, keys, '1234567', { refs: null, warnings });
+  const nMarked = docx.markBody(doc, idx, render);
+  docx.removeFrom(doc, idx);
+
+  const paragraphs = doc.paragraphs.map((p) => p.text);
+  const gotWarn = [...new Set(warnings)].sort();
+
+  const blob = await doc.save();
+  const reread = (await docx.Document.load(await blob.arrayBuffer())).paragraphs.map((p) => p.text);
+
+  const diffs = [];
+  if (idx !== expect.biblio_index) diffs.push(`biblio_index: py ${expect.biblio_index}, js ${idx}`);
+  if (nMarked !== expect.n_marked) diffs.push(`n_marked: py ${expect.n_marked}, js ${nMarked}`);
+  if (raw.size !== Object.keys(expect.entries).length) {
+    diffs.push(`entry count: py ${Object.keys(expect.entries).length}, js ${raw.size}`);
+  }
+  for (const [k, val] of Object.entries(expect.entries)) {
+    if (raw.get(Number(k)) !== val) {
+      diffs.push(`entry ${k}\n    py: ${val}\n    js: ${raw.get(Number(k))}`);
+    }
+  }
+  if (paragraphs.length !== expect.paragraphs.length) {
+    diffs.push(`paragraph count: py ${expect.paragraphs.length}, js ${paragraphs.length}`);
+  }
+  expect.paragraphs.forEach((p, i) => {
+    if (paragraphs[i] !== p) {
+      diffs.push(`paragraph ${i}\n    py: ${JSON.stringify(p)}\n    js: ${JSON.stringify(paragraphs[i])}`);
+    }
+  });
+  if (JSON.stringify(gotWarn) !== JSON.stringify(expect.warnings)) {
+    diffs.push(`warnings\n    py: ${JSON.stringify(expect.warnings)}\n    js: ${JSON.stringify(gotWarn)}`);
+  }
+  reread.forEach((p, i) => {
+    if (p !== paragraphs[i]) diffs.push(`round-trip paragraph ${i}: ${JSON.stringify(p)}`);
+  });
+
+  const checks = 3 + Object.keys(expect.entries).length + expect.paragraphs.length
+    + 1 + reread.length;
+  if (diffs.length) {
+    v.className = 'fail';
+    v.textContent = `FAIL — ${diffs.length} difference(s)`;
+    diffs.forEach((d) => say('  ' + d));
+  } else {
+    v.className = 'pass';
+    v.textContent = `PASS — ${checks} comparisons, 0 differences`;
+    say(`bibliography at paragraph ${idx}, ${raw.size} entries`);
+    say(`${nMarked} in-text citations rewritten`);
+    say(`${gotWarn.length} range warning(s), matching Python`);
+    say(`saved ${blob.size} bytes; re-opened and re-read identically`);
+  }
+} catch (e) {
+  v.className = 'fail';
+  v.textContent = 'ERROR';
+  say(String(e && e.stack || e));
+  say('\nDid you run:  python web/tools/parity/docx_fixture.py');
+}
+</script>
+</body>
+</html>
