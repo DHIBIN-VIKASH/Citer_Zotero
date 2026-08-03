@@ -17,8 +17,11 @@ then open the app's page and run the docx parity check from the browser console.
 """
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -26,12 +29,49 @@ sys.path.insert(0, str(ROOT))
 
 from docx import Document  # noqa: E402
 
+from docx.enum.section import WD_ORIENT, WD_SECTION  # noqa: E402
+from docx.shared import Inches  # noqa: E402
+
 from zotprep.docx_writer import (  # noqa: E402
-    find_biblio_index, make_renderer, mark_body, parse_bibliography, remove_from,
+    biblio_end_index, find_biblio_index, make_renderer, mark_body, parse_bibliography,
+    remove_range,
 )
 
 WEB = ROOT / "web"
 SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+# 1x1 transparent PNG — the smallest thing add_picture accepts.
+PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM"
+    "IQAAAABJRU5ErkJggg=="
+)
+
+
+def outline(doc) -> list[list]:
+    """[tag, text, image count, page size] for every body child.
+
+    The paragraph texts alone cannot show that the trailing matter survived: a
+    deleted image, two tables fused into one, or a lost section break all leave
+    the remaining paragraph text identical. This is what the two engines are
+    compared on instead.
+    """
+    rows = []
+    for el in doc.element.body:
+        tag = el.tag.replace(W, "")
+        sect = el.find(f"{W}pPr/{W}sectPr") if tag == "p" else (el if tag == "sectPr" else None)
+        page = None
+        if sect is not None:
+            sz = sect.find(f"{W}pgSz")
+            if sz is not None:
+                page = [sz.get(f"{W}orient"), sz.get(f"{W}w"), sz.get(f"{W}h")]
+        rows.append([
+            tag,
+            "".join(t.text or "" for t in el.iter(f"{W}t")),
+            sum(1 for _ in el.iter(f"{W}drawing")),
+            page,
+        ])
+    return rows
 
 
 def sup(n: str) -> str:
@@ -89,6 +129,31 @@ def build() -> Path:
     doc.add_paragraph("8. Park S. An eighth reference. Science. 2019;363:200-5.")
     doc.add_paragraph("9. Choi H. A ninth reference. PNAS. 2020;117:5000-10.")
 
+    # 9. Trailing matter: everything that must survive the bibliography being
+    #    removed. The blank paragraph is the author's spacing, the legend carries
+    #    an image, and the tables sit in a landscape section whose break lives in
+    #    a paragraph mark — the one that turns the whole document landscape if it
+    #    is deleted with the reference list.
+    doc.add_paragraph("")
+    doc.add_paragraph("Figure 1. Study selection flow diagram.")
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+        fh.write(PNG)
+        png = fh.name
+    try:
+        doc.add_picture(png, width=Inches(1))
+    finally:
+        os.unlink(png)
+
+    section = doc.add_section(WD_SECTION.NEW_PAGE)
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = Inches(11.69), Inches(8.27)
+    doc.add_paragraph("Tables")
+    doc.add_paragraph("Table 1. Characteristics of the included studies.")
+    doc.add_table(rows=2, cols=3)
+    doc.add_paragraph("NR = not reported.")
+    doc.add_paragraph("Table 2. Pooled estimates by subgroup.")
+    doc.add_table(rows=2, cols=2)
+
     out = WEB / "fixture.docx"
     doc.save(out)
     return out
@@ -112,7 +177,8 @@ def main() -> int:
 
     doc = Document(path)
     idx = find_biblio_index(doc)
-    biblio = "\n".join(p.text for p in doc.paragraphs[idx + 1:])
+    end = biblio_end_index(doc, idx)
+    biblio = "\n".join(p.text for p in doc.paragraphs[idx + 1:end])
     raw = parse_bibliography(biblio)
 
     # Reference 6 is deliberately left unresolved, so the "{NEEDS REVIEW}" branch
@@ -123,12 +189,14 @@ def main() -> int:
     warnings: list[str] = []
     render = make_renderer(resolutions, keys, "1234567", refs=None, warnings=warnings)
     n_marked = mark_body(doc, idx, render)
-    remove_from(doc, idx)
+    remove_range(doc, idx, end)
 
     expect = {
         "biblio_index": idx,
+        "biblio_end": end,
         "entries": {str(k): v for k, v in raw.items()},
         "paragraphs": [p.text for p in doc.paragraphs],
+        "outline": outline(doc),
         "n_marked": n_marked,
         "warnings": sorted(set(warnings)),
     }
@@ -136,7 +204,10 @@ def main() -> int:
         json.dumps(expect, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     print(f"wrote {path.name} and fixture.expect.json")
-    print(f"  bibliography at paragraph {idx}, {len(raw)} entries, {n_marked} markers")
+    print(f"  bibliography at paragraphs [{idx}, {end}), {len(raw)} entries, {n_marked} markers")
+    kept = expect["outline"]
+    print(f"  kept after removal: {sum(1 for r in kept if r[0] == 'tbl')} tables, "
+          f"{sum(r[2] for r in kept)} images, {sum(1 for r in kept if r[3])} section breaks")
     for w in expect["warnings"]:
         print(f"  warning: {w}")
     return 0

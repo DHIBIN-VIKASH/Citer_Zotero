@@ -49,6 +49,20 @@ LEAD = re.compile(
 WEIRD_SPACE = re.compile(r"[ -   　 ]")
 STOP_HEADINGS = re.compile(r"^\s*(tables?|figures?|appendix|supplement\w*)\s*:?\s*$", re.I)
 
+# A figure or table caption, which ends the bibliography as surely as a heading
+# does. Trailing matter often has no heading at all — the legends simply begin —
+# so the caption is the only marker that the reference list has stopped. Tried
+# only after LEAD has failed, so a numbered reference whose title happens to
+# start "Table ..." is still read as a reference.
+CAPTION = re.compile(
+    r"^\s*(?:supplementary|supplemental|appendix|online)?\s*"
+    r"(?:figures?|figs?|tables?|charts?|box(?:es)?|schemes?|panels?|exhibits?)"
+    r"\s*\.?\s*(?:\d|[SE]\d|[IVX]+[\.\s:]|[A-Z][\.\s:])",
+    re.I,
+)
+
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
 # Widest plausible citation range. Beyond this, treat it as a typo, not a range.
 MAX_RANGE_SPAN = 8
 
@@ -316,6 +330,71 @@ def mark_body(doc, biblio_idx: int, render) -> int:
     return count
 
 
-def remove_from(doc, idx: int) -> None:
-    for p in list(doc.paragraphs)[idx:]:
-        p._element.getparent().remove(p._element)
+def _has_image(el) -> bool:
+    return any(next(el.iter(f"{W}{tag}"), None) is not None
+               for tag in ("drawing", "pict", "object"))
+
+
+def biblio_end_index(doc, biblio_idx: int) -> int:
+    """Paragraph index one past the end of the bibliography block.
+
+    A manuscript does not end at its reference list. Figure legends and the
+    images they caption, table captions, the tables themselves and appendices
+    all come after it, and deleting to the end of the document takes every one
+    of them. Two of those losses are worse than they look:
+
+      * Word merges two tables that end up as adjacent siblings, so deleting the
+        captions between three tables silently fuses them into one.
+      * A `w:sectPr` in a paragraph's `w:pPr` is the section break that *ends*
+        the section that paragraph belongs to. Delete the paragraph and the
+        break goes with it, and everything before it joins the following
+        section — one landscape table page at the end of a manuscript is enough
+        to turn the whole document landscape.
+
+    So the block is bounded here, and only the block is removed. It ends at the
+    first thing that plainly is not a reference: a table, a Tables/Figures/
+    Appendix heading, a figure or table caption, or a paragraph carrying an
+    image. Trailing blank paragraphs are left where they are — they are the
+    author's page-break spacing, not part of the bibliography.
+    """
+    paragraphs = list(doc.paragraphs)
+    end = biblio_idx + 1  # the heading itself always goes
+    for i in range(biblio_idx + 1, len(paragraphs)):
+        el = paragraphs[i]._element
+        prev = el.getprevious()
+        if prev is not None and prev.tag == f"{W}tbl":
+            break
+        text = WEIRD_SPACE.sub(" ", paragraphs[i].text)
+        if STOP_HEADINGS.match(text):
+            break
+        if not LEAD.match(text) and CAPTION.match(text):
+            break
+        if _has_image(el):
+            break
+        if text.strip():
+            end = i + 1
+    return end
+
+
+def remove_range(doc, start: int, end: int) -> None:
+    """Remove paragraphs [start, end), keeping any section break they carry.
+
+    A paragraph holding a `w:sectPr` is emptied rather than removed, because the
+    break describes the page setup of everything *before* it (see
+    biblio_end_index). What is left is one empty paragraph carrying the break —
+    the same section boundary, in the same place, with nothing of the
+    bibliography still in it.
+    """
+    for p in list(doc.paragraphs)[start:end]:
+        el = p._element
+        pPr = el.find(f"{W}pPr")
+        sect = pPr.find(f"{W}sectPr") if pPr is not None else None
+        if sect is None:
+            el.getparent().remove(el)
+            continue
+        for child in list(el):
+            if child is not pPr:
+                el.remove(child)
+        for child in list(pPr):
+            if child is not sect:
+                pPr.remove(child)

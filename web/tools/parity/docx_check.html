@@ -34,6 +34,37 @@ const v = document.getElementById('v');
 const out = document.getElementById('out');
 const say = (s) => { out.textContent += s + '\n'; };
 
+const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+/** Mirror of outline() in docx_fixture.py: [tag, text, images, page size]. */
+function outline(doc) {
+  const rows = [];
+  const kids = doc.xml.getElementsByTagNameNS(W, 'body')[0].childNodes;
+  for (const el of kids) {
+    if (el.nodeType !== 1 || el.namespaceURI !== W) continue;
+    const tag = el.localName;
+    let sect = null;
+    if (tag === 'sectPr') sect = el;
+    else if (tag === 'p') {
+      const pPr = [...el.childNodes].find((c) => c.nodeType === 1 && c.namespaceURI === W && c.localName === 'pPr');
+      if (pPr) sect = [...pPr.childNodes].find((c) => c.nodeType === 1 && c.namespaceURI === W && c.localName === 'sectPr') || null;
+    }
+    let page = null;
+    if (sect) {
+      const sz = [...sect.childNodes].find((c) => c.nodeType === 1 && c.namespaceURI === W && c.localName === 'pgSz');
+      if (sz) page = [sz.getAttributeNS(W, 'orient') || null, sz.getAttributeNS(W, 'w'), sz.getAttributeNS(W, 'h')];
+    }
+    const ts = el.getElementsByTagNameNS(W, 't');
+    rows.push([
+      tag,
+      [...ts].map((t) => t.textContent).join(''),
+      el.getElementsByTagNameNS(W, 'drawing').length,
+      page,
+    ]);
+  }
+  return rows;
+}
+
 try {
   const docx = await import('../../src/docx.js');
   const expect = await (await fetch('../../fixture.expect.json')).json();
@@ -41,7 +72,8 @@ try {
 
   const doc = await docx.Document.load(buf);
   const idx = docx.findBiblioIndex(doc);
-  const biblio = doc.paragraphs.slice(idx + 1).map((p) => p.text).join('\n');
+  const end = docx.biblioEndIndex(doc, idx);
+  const biblio = doc.paragraphs.slice(idx + 1, end).map((p) => p.text).join('\n');
   const raw = docx.parseBibliography(biblio);
 
   // Same stubs as docx_fixture.py: reference 6 is left unresolved so the
@@ -64,9 +96,10 @@ try {
   const warnings = [];
   const render = docx.makeRenderer(resolutions, keys, '1234567', { refs: null, warnings });
   const nMarked = docx.markBody(doc, idx, render);
-  docx.removeFrom(doc, idx);
+  docx.removeRange(doc, idx, end);
 
   const paragraphs = doc.paragraphs.map((p) => p.text);
+  const gotOutline = outline(doc);
   const gotWarn = [...new Set(warnings)].sort();
 
   const blob = await doc.save();
@@ -74,6 +107,7 @@ try {
 
   const diffs = [];
   if (idx !== expect.biblio_index) diffs.push(`biblio_index: py ${expect.biblio_index}, js ${idx}`);
+  if (end !== expect.biblio_end) diffs.push(`biblio_end: py ${expect.biblio_end}, js ${end}`);
   if (nMarked !== expect.n_marked) diffs.push(`n_marked: py ${expect.n_marked}, js ${nMarked}`);
   if (raw.size !== Object.keys(expect.entries).length) {
     diffs.push(`entry count: py ${Object.keys(expect.entries).length}, js ${raw.size}`);
@@ -91,6 +125,17 @@ try {
       diffs.push(`paragraph ${i}\n    py: ${JSON.stringify(p)}\n    js: ${JSON.stringify(paragraphs[i])}`);
     }
   });
+  // The body outline is what shows the trailing matter survived: paragraph text
+  // alone looks identical whether or not an image, a table or a section break
+  // was taken out with the bibliography.
+  if (gotOutline.length !== expect.outline.length) {
+    diffs.push(`body children: py ${expect.outline.length}, js ${gotOutline.length}`);
+  }
+  expect.outline.forEach((row, i) => {
+    if (JSON.stringify(gotOutline[i]) !== JSON.stringify(row)) {
+      diffs.push(`body child ${i}\n    py: ${JSON.stringify(row)}\n    js: ${JSON.stringify(gotOutline[i])}`);
+    }
+  });
   if (JSON.stringify(gotWarn) !== JSON.stringify(expect.warnings)) {
     diffs.push(`warnings\n    py: ${JSON.stringify(expect.warnings)}\n    js: ${JSON.stringify(gotWarn)}`);
   }
@@ -98,8 +143,8 @@ try {
     if (p !== paragraphs[i]) diffs.push(`round-trip paragraph ${i}: ${JSON.stringify(p)}`);
   });
 
-  const checks = 3 + Object.keys(expect.entries).length + expect.paragraphs.length
-    + 1 + reread.length;
+  const checks = 4 + Object.keys(expect.entries).length + expect.paragraphs.length
+    + expect.outline.length + 1 + reread.length;
   if (diffs.length) {
     v.className = 'fail';
     v.textContent = `FAIL — ${diffs.length} difference(s)`;
@@ -107,7 +152,10 @@ try {
   } else {
     v.className = 'pass';
     v.textContent = `PASS — ${checks} comparisons, 0 differences`;
-    say(`bibliography at paragraph ${idx}, ${raw.size} entries`);
+    say(`bibliography at paragraphs [${idx}, ${end}), ${raw.size} entries`);
+    say(`kept: ${gotOutline.filter((r) => r[0] === 'tbl').length} tables, `
+      + `${gotOutline.reduce((n, r) => n + r[2], 0)} images, `
+      + `${gotOutline.filter((r) => r[3]).length} section breaks`);
     say(`${nMarked} in-text citations rewritten`);
     say(`${gotWarn.length} range warning(s), matching Python`);
     say(`saved ${blob.size} bytes; re-opened and re-read identically`);

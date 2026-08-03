@@ -26,9 +26,16 @@ The manuscript `.docx` needs:
 2. A heading reading `References`, `Bibliography`, `Works Cited` or `Reference List`,
    followed by the numbered list
 
-A `Tables` / `Figures` / `Appendix` heading after the list ends the bibliography, so
-captions are never imported as references. CLI only: `--bibliography refs.txt` if the
-references live in a separate file.
+The bibliography ends at the first thing that plainly is not a reference: a
+`Tables` / `Figures` / `Appendix` heading, a figure or table caption (`Figure 1.`,
+`Table 2`), a table, or a paragraph carrying an image. Captions are never imported as
+references, and everything from that point on — legends, images, tables, appendices,
+and the section breaks that give a landscape table page its orientation — is left
+exactly as you wrote it. Only the heading and the reference entries are removed. CLI
+only: `--bibliography refs.txt` if the references live in a separate file.
+
+In-text citations are rewritten *before* the bibliography only, so numbers inside
+trailing figure legends and table captions stay as they are.
 
 Entry numbering may use `1.`, `1)`, `[1]`, or a bare number followed by whitespace —
 including the **em space** (U+2003) that Lancet-family templates emit with no delimiter at
@@ -296,7 +303,7 @@ Written to `zot_out/` (or `--outdir`); downloaded directly in the browser.
 
 | File | Contents |
 |:--|:--|
-| `manuscript_scannable.docx` | Your document with Scannable Cite markers `{ \| Author, (Year) \| \| \|zu:USERID:ITEMKEY}` replacing the placeholder numbers, old bibliography removed |
+| `manuscript_scannable.docx` | Your document with Scannable Cite markers `{ \| Author, (Year) \| \| \|zu:USERID:ITEMKEY}` replacing the placeholder numbers, and the old bibliography — heading and entries, nothing else — removed |
 | `report.csv` | `n, status, tier, confidence, doi, pmid, zotero_key, resolved_title, reason, advisory, raw_reference` |
 
 > **Read `report.csv` before scanning.** `tier` tells you *why* each match was accepted,

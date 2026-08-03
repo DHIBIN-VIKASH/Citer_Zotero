@@ -189,7 +189,7 @@ Two deliberate differences from `--review`:
 
 `Apply & rebuild` re-runs the output half of the pipeline. That half re-reads
 the document from the original bytes each time rather than reusing the parsed
-one, because `markBody()` and `removeFrom()` mutate in place — without that, a
+one, because `markBody()` and `removeRange()` mutate in place — without that, a
 second pass would mark up already-marked text and delete from an
 already-truncated body. It is safe to review and rebuild repeatedly.
 

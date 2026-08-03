@@ -238,6 +238,18 @@ const LEAD = /^\s*[[(]?(\d{1,3})[\])\.]?[\s  -   　  ]+(.*)$/;
 const WEIRD_SPACE = /[  -   　  ]/g;
 const STOP_HEADINGS = /^\s*(tables?|figures?|appendix|supplement\w*)\s*:?\s*$/i;
 
+// A figure or table caption, which ends the bibliography as surely as a heading
+// does. Trailing matter often has no heading at all — the legends simply begin —
+// so the caption is the only marker that the reference list has stopped. Tried
+// only after LEAD has failed, so a numbered reference whose title happens to
+// start "Table ..." is still read as a reference.
+const CAPTION = new RegExp(
+  '^\\s*(?:supplementary|supplemental|appendix|online)?\\s*'
+  + '(?:figures?|figs?|tables?|charts?|box(?:es)?|schemes?|panels?|exhibits?)'
+  + '\\s*\\.?\\s*(?:\\d|[SE]\\d|[IVX]+[.\\s:]|[A-Z][.\\s:])',
+  'i',
+);
+
 // Widest plausible citation range. Beyond this, treat it as a typo, not a range.
 const MAX_RANGE_SPAN = 8;
 
@@ -514,8 +526,85 @@ export function markBody(doc, biblioIdx, render) {
   return count;
 }
 
-export function removeFrom(doc, idx) {
-  for (const p of doc.paragraphs.slice(idx)) {
-    p.el.parentNode.removeChild(p.el);
+function hasImage(el) {
+  return ['drawing', 'pict', 'object']
+    .some((tag) => el.getElementsByTagNameNS(W, tag).length > 0);
+}
+
+/**
+ * Paragraph index one past the end of the bibliography block.
+ *
+ * A manuscript does not end at its reference list. Figure legends and the images
+ * they caption, table captions, the tables themselves and appendices all come
+ * after it, and deleting to the end of the document takes every one of them. Two
+ * of those losses are worse than they look:
+ *
+ *   - Word merges two tables that end up as adjacent siblings, so deleting the
+ *     captions between three tables silently fuses them into one.
+ *   - A `w:sectPr` in a paragraph's `w:pPr` is the section break that *ends* the
+ *     section that paragraph belongs to. Delete the paragraph and the break goes
+ *     with it, and everything before it joins the following section — one
+ *     landscape table page at the end of a manuscript is enough to turn the whole
+ *     document landscape.
+ *
+ * So the block is bounded here, and only the block is removed. It ends at the
+ * first thing that plainly is not a reference: a table, a Tables/Figures/Appendix
+ * heading, a figure or table caption, or a paragraph carrying an image. Trailing
+ * blank paragraphs are left where they are — they are the author's page-break
+ * spacing, not part of the bibliography.
+ */
+export function biblioEndIndex(doc, biblioIdx) {
+  const ps = doc.paragraphs;
+  let end = biblioIdx + 1; // the heading itself always goes
+  for (let i = biblioIdx + 1; i < ps.length; i++) {
+    const { el } = ps[i];
+    const prev = el.previousElementSibling;
+    if (prev && prev.namespaceURI === W && prev.localName === 'tbl') break;
+    const text = ps[i].text.replace(WEIRD_SPACE, ' ');
+    if (STOP_HEADINGS.test(text)) break;
+    if (!LEAD.test(text) && CAPTION.test(text)) break;
+    if (hasImage(el)) break;
+    if (text.trim()) end = i + 1;
+  }
+  return end;
+}
+
+/**
+ * Remove paragraphs [start, end), keeping any section break they carry.
+ *
+ * A paragraph holding a `w:sectPr` is emptied rather than removed, because the
+ * break describes the page setup of everything *before* it (see biblioEndIndex).
+ * What is left is one empty paragraph carrying the break — the same section
+ * boundary, in the same place, with nothing of the bibliography still in it.
+ */
+export function removeRange(doc, start, end) {
+  for (const p of doc.paragraphs.slice(start, end)) {
+    const { el } = p;
+    let pPr = null;
+    for (const child of el.childNodes) {
+      if (child.nodeType === 1 && child.namespaceURI === W && child.localName === 'pPr') {
+        pPr = child;
+        break;
+      }
+    }
+    let sect = null;
+    if (pPr) {
+      for (const child of pPr.childNodes) {
+        if (child.nodeType === 1 && child.namespaceURI === W && child.localName === 'sectPr') {
+          sect = child;
+          break;
+        }
+      }
+    }
+    if (!sect) {
+      el.parentNode.removeChild(el);
+      continue;
+    }
+    for (const child of [...el.childNodes]) {
+      if (child !== pPr) el.removeChild(child);
+    }
+    for (const child of [...pPr.childNodes]) {
+      if (child !== sect) pPr.removeChild(child);
+    }
   }
 }

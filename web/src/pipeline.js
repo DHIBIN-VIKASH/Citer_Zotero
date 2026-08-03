@@ -11,7 +11,7 @@
  *
  * finish() is idempotent: it re-loads the document from the original bytes each
  * time rather than reusing the one resolve() read. That matters because
- * markBody() and removeFrom() mutate the document in place, so running finish()
+ * markBody() and removeRange() mutate the document in place, so running finish()
  * a second time on the same object would mark up already-marked text and delete
  * from an already-truncated body. Re-reading costs a few milliseconds and makes
  * "review, then rebuild" safe to repeat as many times as the reader likes.
@@ -24,7 +24,9 @@
  * `{NEEDS REVIEW}` marker in the document instead of becoming a guess in
  * someone's library.
  */
-import { Document, findBiblioIndex, makeRenderer, markBody, parseBibliography, removeFrom } from './docx.js';
+import {
+  Document, biblioEndIndex, findBiblioIndex, makeRenderer, markBody, parseBibliography, removeRange,
+} from './docx.js';
 import { parseReference } from './extractor.js';
 import { newCache, resolveAll } from './resolver.js';
 import { resetProviders, setLogSink } from './search/base.js';
@@ -84,7 +86,10 @@ export async function resolve(file, opts, cb = {}) {
         + '"References" (or "Bibliography", "Works Cited", or "Reference List"). '
         + 'Add one on its own line above your reference list and try again.');
     }
-    biblioText = doc.paragraphs.slice(biblioIdx + 1).map((p) => p.text).join('\n');
+    // Bounded, so that trailing figures and tables are neither read as
+    // references nor removed with them.
+    const biblioEnd = biblioEndIndex(doc, biblioIdx);
+    biblioText = doc.paragraphs.slice(biblioIdx + 1, biblioEnd).map((p) => p.text).join('\n');
   }
 
   const rawRefs = parseBibliography(biblioText);
@@ -167,7 +172,7 @@ export async function finish(state, opts, cb = {}) {
   const warnings = [];
   const render = makeRenderer(results, keys, userid || '0', { refs, warnings });
   const nMarked = markBody(doc, biblioIdx, render);
-  if (!usedPastedBibliography) removeFrom(doc, biblioIdx);
+  if (!usedPastedBibliography) removeRange(doc, biblioIdx, biblioEndIndex(doc, biblioIdx));
   const docxBlob = await doc.save();
 
   const rows = [[

@@ -20,11 +20,12 @@ import httpx
 from . import config
 from .cache import Cache
 from .docx_writer import (
+    biblio_end_index,
     find_biblio_index,
     make_renderer,
     mark_body,
     parse_bibliography,
-    remove_from,
+    remove_range,
 )
 from .extractor import parse_reference
 from .resolver import USER_AGENT, resolve_all
@@ -101,12 +102,15 @@ async def run(args) -> int:
             biblio_text = open(args.bibliography, encoding="utf-8").read()
         except OSError as exc:
             sys.exit(f"Cannot read {args.bibliography}: {exc.strerror or exc}.")
-        biblio_idx = len(doc.paragraphs)
+        biblio_idx = biblio_end = len(doc.paragraphs)
     else:
         biblio_idx = find_biblio_index(doc)
         if biblio_idx is None:
             sys.exit("No 'References' heading found; pass --bibliography.")
-        biblio_text = "\n".join(p.text for p in doc.paragraphs[biblio_idx + 1:])
+        # Bounded, so that trailing figures and tables are neither read as
+        # references nor removed with them.
+        biblio_end = biblio_end_index(doc, biblio_idx)
+        biblio_text = "\n".join(p.text for p in doc.paragraphs[biblio_idx + 1:biblio_end])
 
     raw_refs = parse_bibliography(biblio_text)
     refs = {n: parse_reference(n, t) for n, t in raw_refs.items()}
@@ -153,7 +157,7 @@ async def run(args) -> int:
                            warnings=warnings)
     n_marked = mark_body(doc, biblio_idx, render)
     if not args.bibliography:
-        remove_from(doc, biblio_idx)
+        remove_range(doc, biblio_idx, biblio_end)
     out_docx = os.path.join(args.outdir, "manuscript_scannable.docx")
     doc.save(out_docx)
 
