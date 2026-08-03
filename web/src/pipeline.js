@@ -142,9 +142,23 @@ export async function finish(state, opts, cb = {}) {
   const items = accepted
     .filter((n) => results.get(n).candidate)
     .map((n) => [n, toItem(results.get(n).candidate, refs.get(n))]);
-  const keys = await writer.create(items, (a, b) => onProgress(a, b));
+  const { keys, created, reused, failed } = await writer.create(items, (a, b) => onProgress(a, b));
   for (const [n, k] of keys) results.get(n).zotero_key = k;
-  onLog('info', `Zotero items ready: ${keys.size} created or reused`);
+
+  onLog('info', created
+    ? `Added ${created} new item${created === 1 ? '' : 's'} to your Zotero library`
+      + `${reused ? `, reused ${reused} already there` : ''}.`
+    : (reused
+      ? `Nothing new to add — all ${reused} items were already in your library.`
+      : 'No items were added.'));
+  if (failed.length) {
+    onLog('warn', `${failed.length} item${failed.length === 1 ? '' : 's'} rejected by Zotero `
+      + `(references ${failed.map(([n]) => n).join(', ')}) — see above for each reason.`);
+  }
+  if (created) {
+    onLog('info', 'If Zotero on your desktop does not show them yet, press its Sync button — '
+      + 'items added through the API arrive in the web library first.');
+  }
 
   // Re-read the document so this stage can run again after a review pass.
   onStage('rewriting citations');
@@ -184,7 +198,10 @@ export async function finish(state, opts, cb = {}) {
       accepted: accepted.length,
       unresolved,
       nMarked,
-      created: keys.size,
+      created,
+      reused,
+      failed,
+      inLibrary: keys.size,
     },
     warnings: [...new Set(warnings)],
     advisories,

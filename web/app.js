@@ -27,6 +27,7 @@ const els = {
   progress: $('progress'), stage: $('stage'), count: $('count'), bar: $('bar'),
   results: $('results'), downloads: $('downloads'), rows: $('rows'),
   tTotal: $('tTotal'), tOk: $('tOk'), tRev: $('tRev'), tMark: $('tMark'),
+  tAdded: $('tAdded'), kAdded: $('kAdded'),
   advice: $('advice'), adviceWrap: $('adviceWrap'),
   warns: $('warns'), warnWrap: $('warnWrap'),
   log: $('log'), logHead: $('logHead'),
@@ -217,6 +218,14 @@ function renderResults(out) {
   els.tOk.textContent = stats.accepted;
   els.tRev.textContent = stats.unresolved.length;
   els.tMark.textContent = stats.nMarked;
+
+  // "added" and "already there" must be distinguishable — otherwise a run that
+  // added nothing looks exactly like one that worked.
+  els.tAdded.textContent = stats.created;
+  els.kAdded.textContent = stats.reused
+    ? `added to zotero · ${stats.reused} already there`
+    : 'added to zotero';
+  els.tAdded.parentElement.classList.toggle('warn', stats.created === 0 && stats.reused === 0);
 
   for (const u of objectUrls) URL.revokeObjectURL(u);
   objectUrls = [];
@@ -501,8 +510,8 @@ els.go.addEventListener('click', async () => {
     renderResults(out);
     renderReview(out);
     const secs = ((performance.now() - started) / 1000).toFixed(0);
-    log('info', `Done in ${secs}s. ${out.stats.accepted} of ${out.stats.total} references `
-      + `are now in your Zotero library, ${out.stats.nMarked} in-text citations rewritten.`);
+    log('info', `Done in ${secs}s. ${out.stats.inLibrary} of ${out.stats.total} references `
+      + `are in your Zotero library, ${out.stats.nMarked} in-text citations rewritten.`);
     if (out.stats.unresolved.length) {
       log('warn', `${out.stats.unresolved.length} unresolved: [${out.stats.unresolved.join(', ')}] `
         + '— marked "{NEEDS REVIEW: n}" in the document. Decide them below, then rebuild.');
