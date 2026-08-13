@@ -1,20 +1,22 @@
+<!--
+  The centred header is written as HTML rather than Markdown-inside-HTML on
+  purpose. GitHub parses Markdown nested in a block-level tag; most other
+  renderers — package registries, editor previews, anything built on plain
+  CommonMark — treat everything to the closing tag as literal text, and the
+  heading and badges come out as raw "###" and "![live](…)". Image sources are
+  absolute for the same reason: a relative path only resolves when the file is
+  read inside the repository.
+-->
 <div align="center">
-
-<img src=".github/assets/banner.svg" alt="Z-Link — plain-text citations become real, linked Zotero citations" width="880">
-
-<br><br>
-
-### [**→ Open Z-Link**](https://org-karur-datacenter.github.io/Z--Link/)
-
-<sub>No install. No account here. Your manuscript never leaves the tab.</sub>
-
-<br>
-
-![live](https://img.shields.io/badge/app-live-1f7a3f?style=for-the-badge)
-![accuracy](https://img.shields.io/badge/measured-82%2F82-1f7a3f?style=for-the-badge)
-![parity](https://img.shields.io/badge/engine%20parity-47%2F47-1f7a3f?style=for-the-badge)
-![deps](https://img.shields.io/badge/dependencies-zero-8a6a20?style=for-the-badge)
-
+  <img src="https://raw.githubusercontent.com/ORG-Karur-DataCenter/Z--Link/main/.github/assets/banner.svg" alt="Z-Link — plain-text citations become real, linked Zotero citations" width="880">
+  <br><br>
+  <h3><a href="https://org-karur-datacenter.github.io/Z--Link/"><b>→ Open Z-Link</b></a></h3>
+  <sub>No install. No account here. Your manuscript never leaves the tab.</sub>
+  <br><br>
+  <img src="https://img.shields.io/badge/app-live-1f7a3f?style=for-the-badge" alt="live">
+  <img src="https://img.shields.io/badge/measured-82%2F82-1f7a3f?style=for-the-badge" alt="82 of 82 references resolved">
+  <img src="https://img.shields.io/badge/engine%20parity-55%2F55-1f7a3f?style=for-the-badge" alt="55 of 55 injected port mistakes caught">
+  <img src="https://img.shields.io/badge/dependencies-zero-8a6a20?style=for-the-badge" alt="zero dependencies">
 </div>
 
 <br>
@@ -37,30 +39,23 @@ citation quietly pointing at the wrong paper.
 <table>
 <tr>
 <td width="50%" valign="top">
-
-**In the browser** — nothing to install
-
-1. [Open Z-Link](https://org-karur-datacenter.github.io/Z--Link/)
-2. Paste your Zotero userID and API key
-   <br><sub>the **First time here** button walks you through it</sub>
-3. Drop in your `.docx`
-
+  <p><b>In the browser</b> — nothing to install</p>
+  <ol>
+    <li><a href="https://org-karur-datacenter.github.io/Z--Link/">Open Z-Link</a></li>
+    <li>Paste your Zotero userID and API key
+      <br><sub>the <b>First time here</b> button walks you through it</sub></li>
+    <li>Drop in your <code>.docx</code></li>
+  </ol>
 </td>
 <td width="50%" valign="top">
-
-**On the command line**
-
-```bash
-pip install -r requirements.txt
+  <p><b>On the command line</b></p>
+  <pre><code>pip install -r requirements.txt
 
 python -m zotprep --zotero-userid 1234567 \
   --zotero-key KEY --save-credentials
 
-python -m zotprep --manuscript paper.docx
-```
-
-<sub>Dry run is the default. Add `--live` to write.</sub>
-
+python -m zotprep --manuscript paper.docx</code></pre>
+  <sub>Dry run is the default. Add <code>--live</code> to write.</sub>
 </td>
 </tr>
 </table>
