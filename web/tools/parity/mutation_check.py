@@ -217,8 +217,8 @@ PROBES: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
         ),
         (
             "greedy volume in the locator",
-            "'(?<vol>[A-Za-z]?[\\\\dA-Za-z]{0,8}?)\\\\s*'",
-            "'(?<vol>[A-Za-z]?[\\\\dA-Za-z]{0,8})\\\\s*'",
+            "'(?<vol>[A-Za-z]?[\\\\dA-Za-z]{0,8}?)'",
+            "'(?<vol>[A-Za-z]?[\\\\dA-Za-z]{0,8})'",
         ),
         (
             "rstrip removes a single dot only",
