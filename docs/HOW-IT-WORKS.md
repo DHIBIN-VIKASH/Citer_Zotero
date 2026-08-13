@@ -37,6 +37,11 @@ only: `--bibliography refs.txt` if the references live in a separate file.
 In-text citations are rewritten *before* the bibliography only, so numbers inside
 trailing figure legends and table captions stay as they are.
 
+A document whose bibliography parses but whose citations are recognised **nowhere** stops
+the run before anything is resolved or added, and the reference list is never removed when
+nothing has replaced it — a manuscript that comes back with neither citations nor a
+bibliography is worse than one that was refused.
+
 Entry numbering may use `1.`, `1)`, `[1]`, or a bare number followed by whitespace —
 including the **em space** (U+2003) that Lancet-family templates emit with no delimiter at
 all.
@@ -55,7 +60,14 @@ Theil H. Economics and information theory. Amsterdam: North-Holland, 1967.
 Cowell FA. Measuring Inequality. 3rd ed. Oxford: Oxford University Press; 2011.
 Khosla S, Pacifici R. Estrogen deficiency... In: Marcus R, Dempster DW, et al, eds.
     Osteoporosis, 4th edn. Amsterdam: Elsevier, 2013: 1113-36.
+Manchikanti L, Singh V. Epidemiology of low back pain. Neuromodulation. 2014;17 Suppl 2:3-10.
+Bhatia R, Chopra G. Efficacy of platelet rich plasma. J Clin Diagn Res. 2016;10(9):UC05-7.
 ```
+
+The last two are the supplement volume (`17 Suppl 2` → volume 17) and the two-letter page
+prefix (`UC05`). Both matter more than they look: the locator carries journal, volume and
+first page, so a locator the pattern cannot read leaves the accept gate with nothing to
+agree on and the reference is rejected outright rather than matched loosely.
 
 That last form becomes a Zotero **bookSection** with the chapter title, containing
 `bookTitle`, edition, publisher, place and page range.
@@ -78,6 +90,32 @@ per-run scan can see.
 | Lancet separator — U+00B7 middle dot | `¹·²⁻⁴` | 1, 2, 3, 4 |
 | Superscript minus range — U+207B | `⁴³⁻⁴⁵` | 43, 44, 45 |
 | Digits fused to punctuation | `systems.29-32` | 29…32 |
+| Plain digits after a space | `knee OA 2.` `analgesia 6,7.` | 2 / 6,7 |
+
+<details>
+<summary><b>Plain digits that are <i>not</i> citations</b></summary>
+
+<br>
+
+The space-separated form is what a superscript citation becomes when a manuscript is
+pasted as plain text, and it is the one notation genuinely ambiguous with prose —
+`25 patients`, `Group 4` and `for 12 months` all have the same shape. It is accepted only
+when the sentence before it ended, the clause after it ends, or the digits come as a
+comma-separated list, and rejected when:
+
+```
+Group 4, Table 2, grade 2-3      the number labels the word before it
+of 25, than 12, into 4 groups    a function word a citation never follows
+By month 1, at months 1, 3, 6    a timepoint label rather than a unit
+4-6 times, 4,326 patients        a measurement the digits belong to
+(baseline 62.14                  a decimal, not a sentence that ended
+2, 3, 1 and 4 losses             a list that runs backwards
+```
+
+`3 months 6,8.` is a citation, though: the unit already took its own number, so what
+follows it is not part of the measurement.
+
+</details>
 
 <details>
 <summary><b>Superscripts that are <i>not</i> citations</b></summary>
@@ -303,8 +341,20 @@ Written to `zot_out/` (or `--outdir`); downloaded directly in the browser.
 
 | File | Contents |
 |:--|:--|
-| `manuscript_scannable.docx` | Your document with Scannable Cite markers `{ \| Author, (Year) \| \| \|zu:USERID:ITEMKEY}` replacing the placeholder numbers, and the old bibliography — heading and entries, nothing else — removed |
+| `manuscript_zotero.docx` | Your document with live Zotero citations — Word field codes (`ADDIN ZOTERO_ITEM CSL_CITATION`) replacing the placeholder numbers, and the old bibliography — heading and entries, nothing else — removed. Open it in Word; no plugin, no conversion step |
+| `manuscript_scannable.docx` | The same document with Scannable Cite markers `{ \| Author, (Year) \| \| \|zu:USERID:ITEMKEY}` instead, for the ODF Scan plugin. CLI: `--style scannable`. The browser produces both |
 | `report.csv` | `n, status, tier, confidence, doi, pmid, zotero_key, resolved_title, reason, advisory, raw_reference` |
+
+One citation, however many references it carries: `6,7` becomes a single field of two
+items, which is how Zotero models it. A group where only some references resolved is split
+— the resolved part becomes a field, the rest stays a visible `{NEEDS REVIEW: n}`, so a
+half-resolved citation cannot look finished.
+
+> **On ODF Scan.** It converts by scanning `document.xml` as text, looking for
+> brace-delimited markers. A Word picture carries `uri="{GUID}"` attributes of the same
+> shape, and a manuscript with images came back with a citation written into the middle of
+> one — a file Word refuses to open. Writing the fields directly is what removes that
+> failure mode, along with the conversion step itself.
 
 > **Read `report.csv` before scanning.** `tier` tells you *why* each match was accepted,
 > which is more informative than the confidence number. Rows with tier

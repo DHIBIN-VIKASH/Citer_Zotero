@@ -33,8 +33,8 @@ from docx.enum.section import WD_ORIENT, WD_SECTION  # noqa: E402
 from docx.shared import Inches  # noqa: E402
 
 from zotprep.docx_writer import (  # noqa: E402
-    biblio_end_index, find_biblio_index, make_renderer, mark_body, parse_bibliography,
-    remove_range,
+    biblio_end_index, find_biblio_index, make_renderer, mark_body, mark_body_fields,
+    parse_bibliography, remove_range,
 )
 
 WEB = ROOT / "web"
@@ -172,6 +172,21 @@ class StubResolution:
         self.candidate = StubCandidate(n) if status != "REVIEW" else None
 
 
+def field_outline(doc) -> dict:
+    """What the field path wrote: the instructions, and the field characters.
+
+    Compared rather than the raw XML because the two engines serialise
+    differently (attribute order, self-closing tags) while having to agree
+    exactly on what Word and Zotero read: the ADDIN instruction, and a
+    begin/separate/end sequence that balances.
+    """
+    return {
+        "instr": [(t.text or "") for t in doc.element.body.iter(f"{W}instrText")],
+        "fld": [fc.get(f"{W}fldCharType") for fc in doc.element.body.iter(f"{W}fldChar")],
+        "paragraphs": [p.text for p in doc.paragraphs],
+    }
+
+
 def main() -> int:
     path = build()
 
@@ -191,6 +206,17 @@ def main() -> int:
     n_marked = mark_body(doc, idx, render)
     remove_range(doc, idx, end)
 
+    # The same document again, through the field path. A second read of the file
+    # rather than a second pass over `doc`, which has already been rewritten.
+    fdoc = Document(path)
+    fidx = find_biblio_index(fdoc)
+    fend = biblio_end_index(fdoc, fidx)
+    ids = iter(f"ID{n:06d}" for n in range(1, 999))
+    frender = make_renderer(resolutions, keys, "1234567", style="fields", refs=None,
+                            warnings=[], new_id=lambda: next(ids))
+    n_fields = mark_body_fields(fdoc, fidx, frender)
+    remove_range(fdoc, fidx, fend)
+
     expect = {
         "biblio_index": idx,
         "biblio_end": end,
@@ -199,6 +225,7 @@ def main() -> int:
         "outline": outline(doc),
         "n_marked": n_marked,
         "warnings": sorted(set(warnings)),
+        "fields": {**field_outline(fdoc), "n_marked": n_fields},
     }
     (WEB / "fixture.expect.json").write_text(
         json.dumps(expect, ensure_ascii=False, indent=1), encoding="utf-8"
@@ -208,6 +235,7 @@ def main() -> int:
     kept = expect["outline"]
     print(f"  kept after removal: {sum(1 for r in kept if r[0] == 'tbl')} tables, "
           f"{sum(r[2] for r in kept)} images, {sum(1 for r in kept if r[3])} section breaks")
+    print(f"  fields: {n_fields} citations, {len(expect['fields']['instr'])} ADDIN instructions")
     for w in expect["warnings"]:
         print(f"  warning: {w}")
     return 0

@@ -25,7 +25,8 @@
  * someone's library.
  */
 import {
-  Document, biblioEndIndex, findBiblioIndex, makeRenderer, markBody, parseBibliography, removeRange,
+  Document, biblioEndIndex, countCitations, findBiblioIndex, hasImages, makeRenderer, markBody,
+  markBodyFields, parseBibliography, removeRange,
 } from './docx.js';
 import { parseReference } from './extractor.js';
 import { newCache, resolveAll } from './resolver.js';
@@ -65,10 +66,6 @@ export async function resolve(file, opts, cb = {}) {
   resetProviders();
   setLogSink(onLog);
 
-  // Fail on bad credentials before doing several minutes of resolution work.
-  onStage('verifying Zotero credentials');
-  await new ZoteroWriter(userid, apiKey, { onLog }).verify();
-
   onStage('reading the document');
   const buffer = await file.arrayBuffer();
   const doc = await Document.load(buffer);
@@ -97,9 +94,26 @@ export async function resolve(file, opts, cb = {}) {
     throw new Error('Found the bibliography but could not read any entries from it.');
   }
 
+  // A bibliography with nothing citing it means the in-text notation was not
+  // recognised. Stop here rather than after several minutes of resolution: the
+  // run would end by removing the reference list and linking nothing.
+  const nFound = countCitations(doc, biblioIdx);
+  if (!nFound) {
+    throw new Error(`Read ${rawRefs.size} references from the bibliography, but found no `
+      + 'citations in the body of the document. Z-Link recognises [1] and (2,3), '
+      + 'superscript ¹², and plain digits such as "…knee OA 2." or "…analgesia 6,7." '
+      + 'Nothing was changed and nothing was added to your library.');
+  }
+
   const refs = new Map();
   for (const [n, t] of rawRefs) refs.set(n, parseReference(n, t));
-  onLog('info', `Parsed ${refs.size} references.`);
+  onLog('info', `Parsed ${refs.size} references, ${nFound} in-text citations.`);
+
+  // Both checks happen before any resolution work: a wrong key is worth knowing
+  // in two seconds rather than after several minutes of searching. The document
+  // is read first only because reading it is local and instant.
+  onStage('verifying Zotero credentials');
+  await new ZoteroWriter(userid, apiKey, { onLog }).verify();
 
   onStage(`resolving ${refs.size} references`);
   const cache = newCache();
@@ -165,15 +179,45 @@ export async function finish(state, opts, cb = {}) {
       + 'items added through the API arrive in the web library first.');
   }
 
-  // Re-read the document so this stage can run again after a review pass.
+  // Two documents, from the same resolutions. `fields` is the one to use: Word
+  // field codes Zotero reads directly, finished on download. `scannable` is the
+  // old Scannable Cite output, kept for anyone who needs the ODF Scan route.
+  //
+  // Each is built from a fresh read of the original bytes, because markBody and
+  // removeRange mutate the document in place — see the note at the top of this
+  // file.
   onStage('rewriting citations');
-  const doc = await Document.load(buffer);
-  const biblioIdx = usedPastedBibliography ? doc.paragraphs.length : findBiblioIndex(doc);
   const warnings = [];
-  const render = makeRenderer(results, keys, userid || '0', { refs, warnings });
-  const nMarked = markBody(doc, biblioIdx, render);
-  if (!usedPastedBibliography) removeRange(doc, biblioIdx, biblioEndIndex(doc, biblioIdx));
-  const docxBlob = await doc.save();
+  const built = {};
+  let nMarked = 0;
+  for (const style of ['fields', 'scannable']) {
+    const doc = await Document.load(buffer);
+    const biblioIdx = usedPastedBibliography ? doc.paragraphs.length : findBiblioIndex(doc);
+    // Only one pass may collect warnings, or every one is reported twice.
+    const render = makeRenderer(results, keys, userid || '0',
+      { refs, warnings: style === 'fields' ? warnings : null, style });
+    const n = style === 'fields'
+      ? markBodyFields(doc, biblioIdx, render)
+      : markBody(doc, biblioIdx, render);
+    // The reference list goes only when something has taken its place. Removing
+    // it after marking nothing would hand back a manuscript with no citations
+    // and no bibliography either.
+    if (!usedPastedBibliography && n) {
+      removeRange(doc, biblioIdx, biblioEndIndex(doc, biblioIdx));
+    } else if (!usedPastedBibliography && style === 'fields') {
+      warnings.push('No citations were rewritten, so the bibliography has been left in place.');
+    }
+    built[style] = await doc.save();
+    if (style === 'fields') {
+      nMarked = n;
+      if (hasImages(doc)) {
+        warnings.push('This document contains images. The ODF Scan copy below is the one '
+          + 'affected: that plugin can write a citation into a picture\'s XML and produce a '
+          + 'file Word refuses to open. The Word copy needs no conversion and is unaffected.');
+      }
+    }
+  }
+  const docxBlob = built.fields;
 
   const rows = [[
     'n', 'status', 'tier', 'confidence', 'doi', 'pmid', 'zotero_key',
@@ -194,6 +238,7 @@ export async function finish(state, opts, cb = {}) {
 
   return {
     docxBlob,
+    scannableBlob: built.scannable,
     reportCsv: new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }),
     results,
     refs,

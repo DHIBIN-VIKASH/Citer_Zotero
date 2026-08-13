@@ -55,11 +55,24 @@ const BRACKET_NOTE = /\[[^\]]*\]/g;
 const YEAR_RE = new RegExp(`${NWB}(19|20)\\d{2}${NWA}`, 'gu');
 
 // "2017;390(10111):2437-60"  /  "2012;10:1"  /  "2004;S2:11-44"
+//
+// Two shapes that are ordinary in medical Vancouver and that a tighter pattern
+// misses entirely — and missing the locator does not degrade the match, it
+// removes it: journal, volume and first page all come back empty, so the accept
+// gate has nothing left to agree on and the reference is rejected.
+//
+//   "2011;63 Suppl 11:S240-52"   a supplement, with a space inside the volume
+//   "2016;10(9):UC05-7"          a first page with two letters, not one
+//
+// The supplement is captured so it cannot be mistaken for part of the volume,
+// and then dropped: indexes store the base volume ("63"), which is what the
+// volume comparison needs to see.
 const LOCATOR_SRC =
   `${NWB}(?<year>(?:19|20)\\d{2})\\s*;\\s*` +
-  '(?<vol>[A-Za-z]?[\\dA-Za-z]{0,8}?)\\s*' +
+  '(?<vol>[A-Za-z]?[\\dA-Za-z]{0,8}?)' +
+  '(?:\\s*(?<suppl>[Ss]uppl(?:ement)?\\.?\\s*[\\dA-Za-z]{0,4}))?\\s*' +
   '(?:\\(\\s*(?<issue>[^)]{1,20})\\s*\\))?\\s*' +
-  ':\\s*(?<fp>[A-Za-z]?\\d+)(?:\\s*-\\s*(?<lp>[A-Za-z]?\\d+))?';
+  ':\\s*(?<fp>[A-Za-z]{0,3}\\d+)(?:\\s*-\\s*(?<lp>[A-Za-z]{0,3}\\d+))?';
 const LOCATOR_RE = new RegExp(LOCATOR_SRC, 'u');
 
 // Book imprint tail. Both separators before the year occur in the wild:

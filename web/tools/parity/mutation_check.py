@@ -351,11 +351,55 @@ PROBES["scorer"] = ("scorer.js", [
     ),
 ])
 
+PROBES["detached"] = ("docx.js", [
+    (
+        "block list tested case-sensitively",
+        "const low = word.toLowerCase();",
+        "const low = word;",
+    ),
+    (
+        "timepoint labels no longer need a number before them",
+        "if (DETACHED_TIME.has(low) && !COUNTED_BEFORE.test(text.slice(0, wordStart))) continue;",
+        "",
+    ),
+    (
+        "trailing unit ignored",
+        "    if (tail && DETACHED_UNITS.has(tail[1].toLowerCase())) continue;",
+        "",
+    ),
+    (
+        "thousands separator read as a citation list",
+        "    if (THOUSANDS.test(nums)) continue;",
+        "",
+    ),
+    (
+        "reference 0 allowed",
+        "    if (vals.some((v) => v === 0)) continue;",
+        "",
+    ),
+    (
+        "list order and repeats not checked",
+        "    if (ascending.length !== vals.length || ascending.some((v, i) => v !== vals[i])) continue;",
+        "",
+    ),
+    (
+        "decimal point read as the end of a sentence",
+        "    if (post === '.' && /\\d/.test(text.slice(numsEnd + 1, numsEnd + 2))) continue;",
+        "",
+    ),
+    (
+        "a bare mid-sentence number accepted",
+        "    if (!((punct && '.!?'.includes(punct)) || endsClause || vals.length > 1)) continue;",
+        "",
+    ),
+])
+
 HARNESS = {
     "fuzz": ["fuzz_parity.py", "--cases", "6000"],
     "utils": ["utils_parity.py"],
     "extractor": ["extractor_parity.py"],
     "scorer": ["scorer_parity.py"],
+    "detached": ["detached_parity.py"],
 }
 
 

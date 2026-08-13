@@ -23,7 +23,8 @@
 
 Drop in a `.docx` with numbered citations and a plain bibliography. Z-Link finds each
 reference across five indexes, verifies it is genuinely the right paper, adds the items to
-your Zotero library, and returns a document ready for ODF Scan.
+your Zotero library, and returns the document with **live Zotero citations** in it — open
+it in Word, nothing else to install or run.
 
 It does **not** decide where a citation belongs — that is your judgment while writing.
 Anything it cannot confirm becomes a visible `{NEEDS REVIEW: n}` rather than a live
@@ -64,8 +65,15 @@ python -m zotprep --manuscript paper.docx
 </tr>
 </table>
 
-Then in Zotero: **Tools → ODF Scan** → file type **ODF (to citations)** → pick the
-downloaded file. The plugin is [bundled here](web/vendor/) and downloadable from the app.
+Then open the `.docx` in Word. The citations are Zotero field codes: Zotero asks for a
+citation style the first time you refresh them, and **Add/Edit Bibliography** rebuilds the
+reference list in that style.
+
+<sub>A Scannable Cite copy for the <b>ODF Scan</b> plugin is produced alongside, for
+LibreOffice or for checking the markers before they become citations — the plugin is
+<a href="web/vendor/">bundled here</a>. It is no longer the main route: ODF Scan finds its
+markers by scanning the file as text, and in a manuscript with images that can put a
+citation inside a picture's XML and produce a file Word refuses to open.</sub>
 
 <br>
 

@@ -33,6 +33,7 @@ HARNESSES = [
     ("utils", ["utils_parity.py"]),
     ("extractor", ["extractor_parity.py"]),
     ("scorer", ["scorer_parity.py"]),
+    ("detached", ["detached_parity.py"]),
 ]
 
 

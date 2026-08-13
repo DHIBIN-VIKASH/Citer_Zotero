@@ -143,8 +143,48 @@ try {
     if (p !== paragraphs[i]) diffs.push(`round-trip paragraph ${i}: ${JSON.stringify(p)}`);
   });
 
+  // The field path, on a second read of the same fixture. Compared on what Word
+  // and Zotero actually read — the ADDIN instructions and the field characters
+  // around them — rather than on the serialised XML, which the two engines are
+  // free to write differently.
+  const fdoc = await docx.Document.load(buf);
+  const fidx = docx.findBiblioIndex(fdoc);
+  const fend = docx.biblioEndIndex(fdoc, fidx);
+  let seq = 0;
+  const frender = docx.makeRenderer(resolutions, keys, '1234567', {
+    style: 'fields', refs: null, warnings: [], newId: () => `ID${String(++seq).padStart(6, '0')}`,
+  });
+  const nFields = docx.markBodyFields(fdoc, fidx, frender);
+  docx.removeRange(fdoc, fidx, fend);
+
+  const gotInstr = [...fdoc.xml.getElementsByTagNameNS(W, 'instrText')].map((e) => e.textContent);
+  const gotFld = [...fdoc.xml.getElementsByTagNameNS(W, 'fldChar')]
+    .map((e) => e.getAttributeNS(W, 'w:fldCharType') || e.getAttribute('w:fldCharType'));
+  const gotFieldParas = fdoc.paragraphs.map((p) => p.text);
+
+  if (nFields !== expect.fields.n_marked) {
+    diffs.push(`field n_marked: py ${expect.fields.n_marked}, js ${nFields}`);
+  }
+  expect.fields.instr.forEach((instr, i) => {
+    if (gotInstr[i] !== instr) {
+      diffs.push(`field instruction ${i}\n    py: ${JSON.stringify(instr)}\n    js: ${JSON.stringify(gotInstr[i])}`);
+    }
+  });
+  if (gotInstr.length !== expect.fields.instr.length) {
+    diffs.push(`field instruction count: py ${expect.fields.instr.length}, js ${gotInstr.length}`);
+  }
+  if (JSON.stringify(gotFld) !== JSON.stringify(expect.fields.fld)) {
+    diffs.push(`field characters\n    py: ${JSON.stringify(expect.fields.fld)}\n    js: ${JSON.stringify(gotFld)}`);
+  }
+  expect.fields.paragraphs.forEach((p, i) => {
+    if (gotFieldParas[i] !== p) {
+      diffs.push(`field paragraph ${i}\n    py: ${JSON.stringify(p)}\n    js: ${JSON.stringify(gotFieldParas[i])}`);
+    }
+  });
+
   const checks = 4 + Object.keys(expect.entries).length + expect.paragraphs.length
-    + expect.outline.length + 1 + reread.length;
+    + expect.outline.length + 1 + reread.length
+    + 3 + expect.fields.instr.length + expect.fields.paragraphs.length;
   if (diffs.length) {
     v.className = 'fail';
     v.textContent = `FAIL — ${diffs.length} difference(s)`;
@@ -159,6 +199,8 @@ try {
     say(`${nMarked} in-text citations rewritten`);
     say(`${gotWarn.length} range warning(s), matching Python`);
     say(`saved ${blob.size} bytes; re-opened and re-read identically`);
+    say(`${nFields} Zotero fields written, ${gotInstr.length} ADDIN instructions `
+      + 'byte-identical to Python');
   }
 } catch (e) {
   v.className = 'fail';

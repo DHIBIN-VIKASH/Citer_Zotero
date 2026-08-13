@@ -2,12 +2,25 @@
 
 Marker logic is carried over from the original script — it worked. The change is
 what gets substituted: only references that passed the accept gate become live
-Scannable Cite markers. Anything else stays visibly unresolved in the document
-rather than silently pointing at the wrong paper.
+citations. Anything else stays visibly unresolved in the document rather than
+silently pointing at the wrong paper.
+
+Two output styles, and they differ in more than formatting:
+
+  fields      Word field codes Zotero reads directly (`ADDIN ZOTERO_ITEM`). The
+              document is finished when it is downloaded.
+  scannable   Scannable Cite markers for the Zotero ODF Scan plugin, which
+              converts them in a second pass. Kept as a fallback.
 """
 from __future__ import annotations
 
+import copy
+import json
+import random
 import re
+import string
+
+from lxml import etree
 
 HEADERS = re.compile(r"^\s*(references|bibliography|works cited|reference list)\s*:?\s*$", re.I)
 # Superscript citation notation. Beyond the digits, journal templates in the
@@ -36,6 +49,60 @@ PLAIN_ATTACHED = re.compile(
     r"(?<=[A-Za-z][.;,!?])"
     r"(\d{1,3}(?:\s*[-–—]\s*\d{1,3})?(?:\s*,\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)*)"
 )
+
+# The same degradation, but with the space surviving:
+#
+#     "...in adults aged 45 years and older. 1 According to..."
+#     "...the disease burden being for knee OA 2."
+#     "...short-lived analgesia 6,7."
+#
+# This is what a superscript citation becomes when a manuscript is pasted as
+# plain text, and it is the one notation that is genuinely ambiguous with prose —
+# "25 patients", "Group 4", "for 12 months" have exactly the same shape. So the
+# match is deliberately conservative, and every guard below exists because a
+# real manuscript in the corpus tripped over it. A missed citation leaves a
+# visible "{NEEDS REVIEW}"; a false one rewrites the author's sentence.
+_NUMS = r"\d{1,3}(?:\s*[-–—]\s*\d{1,3})?(?:\s*,\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)*"
+PLAIN_DETACHED = re.compile(
+    rf"(?P<word>[A-Za-z]+)(?P<punct>[.;,!?])?[  ](?P<nums>{_NUMS})(?P<post>.|$)"
+)
+
+# Words that take a number as their *label* ("Group 4", "Table 2"), and function
+# words a citation never follows ("of 25", "than 12"). Either way the digits are
+# prose, not a reference.
+DETACHED_BLOCK = frozenset({
+    "group", "groups", "grade", "grades", "table", "tables", "figure", "figures", "fig",
+    "stage", "phase", "type", "level", "class", "no", "number", "chapter", "part",
+    "section", "step", "arm", "visit", "score", "kl", "n", "p", "r",
+    "version", "item", "question", "page", "line",
+    "of", "to", "in", "at", "for", "from", "by", "with", "than", "up", "over", "under",
+    "about", "approximately", "and", "or", "was", "were", "is", "are", "be", "been",
+    "into", "onto", "per", "versus", "vs", "until", "till", "between", "within",
+    "mean", "median", "total", "only", "all", "aged", "age", "range", "ratio",
+    "the", "a", "an", "had", "has", "have", "each", "both", "every", "another",
+})
+
+# Timepoints cut both ways: "By month 1," labels the timepoint, while "beyond
+# 3 months 6,8." is a unit that already took its number — what follows it is a
+# citation. The digit before the word is what separates them.
+DETACHED_TIME = frozenset({
+    "month", "months", "week", "weeks", "day", "days", "year", "years",
+    "hour", "hours", "visit", "visits", "session", "sessions", "cycle", "cycles",
+})
+COUNTED_BEFORE = re.compile(r"\d\s*$")
+
+# A measurement the digits belong to rather than a citation: "1, 3, 6 and 12
+# months", "4-6 times baseline", "37 studies comprising 4,326 patients".
+DETACHED_UNITS = frozenset({
+    "month", "months", "week", "weeks", "day", "days", "year", "years", "hour", "hours",
+    "minute", "minutes", "time", "times", "fold", "patient", "patients", "case", "cases",
+    "subject", "subjects", "participant", "participants", "study", "studies", "trial",
+    "trials", "ml", "mm", "cm", "mg", "kg", "g", "l", "percent", "point", "points",
+    "degree", "degrees", "unit", "units", "group", "groups", "session", "sessions",
+    "injection", "injections", "site", "sites", "million", "billion", "thousand",
+})
+TRAILING_UNIT = re.compile(r"^[\s)]*(?:and\s+\d{1,3}\s+)?([A-Za-z]+)")
+THOUSANDS = re.compile(r"^\d{1,3},\d{3}$")
 # Entry numbering, e.g. "1. Smith J", "[1] Smith J", "1) Smith J", and — as
 # produced by Lancet-family templates — "1<em-space>Smith J" with no delimiter at
 # all. The delimiter is therefore optional, but separating whitespace is not:
@@ -119,8 +186,12 @@ def make_renderer(
     style: str = "scannable",
     refs: dict | None = None,
     warnings: list[str] | None = None,
+    new_id=None,
 ):
-    """Return render(spec) -> replacement text for a citation group like '1,3-5'.
+    """Return render(spec) -> replacement for a citation group like '1,3-5'.
+
+    With `style="fields"` the replacement is a list of pieces for
+    `mark_body_fields`; otherwise it is the marker text `mark_body` writes.
 
     Oversized ranges are refused rather than expanded. A superscript range
     spanning dozens of references is a dropped digit in the manuscript
@@ -187,7 +258,224 @@ def make_renderer(
                 parts.append(f"{{NEEDS REVIEW: ref {n}}}")
         return "".join(parts)
 
-    return render
+    def render_fields(spec: str):
+        """One citation becomes one field however many references it carries.
+
+        That is how Zotero models "6,7" — a single citation of two items.
+        Anything unresolved stays visible text between the fields rather than
+        being folded into one, so a half-resolved group cannot look resolved.
+        """
+        nums = expand(spec)
+        if not nums:
+            return None
+        pieces: list[dict] = []
+        items: list[dict] = []
+
+        def flush() -> None:
+            if not items:
+                return
+            pieces.append({
+                "kind": "field",
+                "json": citation_json(items, uid, make_id()),
+                "label": "; ".join(i["label"] for i in items),
+            })
+            items.clear()
+
+        for n in nums:
+            res = resolutions[n]
+            if res.status in ("ACCEPTED", "FROM_TEXT") and keys.get(n):
+                items.append({"key": keys[n], "label": label(n)})
+            else:
+                flush()
+                pieces.append({"kind": "text", "value": f"{{NEEDS REVIEW: ref {n}}}"})
+        flush()
+        return pieces
+
+    make_id = new_id or random_citation_id
+    return render_fields if style == "fields" else render
+
+
+# --- Zotero fields ------------------------------------------------------------
+#
+# A live Zotero citation in a .docx is a Word field, five runs long:
+#
+#   fldChar begin | instrText " ADDIN ZOTERO_ITEM CSL_CITATION {json} "
+#                 | fldChar separate | the visible text | fldChar end
+#
+# The JSON shape below is copied from a document Zotero itself produced — the
+# same keys, in the same order, with no additions. Zotero matches items by the
+# `uris` entry; everything else is what it shows before the first refresh.
+#
+# Writing these directly is what removes ODF Scan from the workflow. ODF Scan
+# finds its markers by scanning document.xml as a string, which is why a picture
+# whose XML happens to contain `uri="{...}"` can end up with a citation spliced
+# into the middle of an attribute, producing a file Word refuses to open.
+CSL_SCHEMA = "https://github.com/citation-style-language/schema/raw/master/csl-citation.json"
+ID_ALPHABET = string.ascii_letters + string.digits
+XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+
+
+def random_citation_id(rng: random.Random | None = None) -> str:
+    """Zotero's citationID: eight characters, unique within the document."""
+    r = rng or random
+    return "".join(r.choice(ID_ALPHABET) for _ in range(8))
+
+
+def citation_json(items: list[dict], uid: str, cid: str) -> str:
+    """The CSL_CITATION payload for one citation, which may carry several items.
+
+    Serialised without spaces after the separators, matching what Zotero writes.
+    """
+    shown = "; ".join(i["label"] for i in items)
+    return json.dumps(
+        {
+            "citationID": cid,
+            "properties": {"formattedCitation": shown, "plainCitation": shown},
+            "citationItems": [
+                {"uris": [f"http://zotero.org/users/{uid}/items/{i['key']}"]} for i in items
+            ],
+            "schema": CSL_SCHEMA,
+        },
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def _fld_char_run(el_factory, kind: str):
+    r = el_factory(W + "r")
+    fc = el_factory(W + "fldChar")
+    fc.set(W + "fldCharType", kind)
+    r.append(fc)
+    return r
+
+
+def _field_runs(el_factory, json_text: str, label: str, rpr):
+    """The five runs of one Zotero field.
+
+    `rpr` is the formatting of the text being replaced, so the citation reads in
+    the manuscript's font rather than Word's default.
+    """
+    runs = [_fld_char_run(el_factory, "begin")]
+
+    instr_run = el_factory(W + "r")
+    instr = el_factory(W + "instrText")
+    instr.set(XML_SPACE, "preserve")
+    # lxml escapes for us, which is the whole point: the JSON is data, and a
+    # title containing "<" must not become markup.
+    instr.text = f" ADDIN ZOTERO_ITEM CSL_CITATION {json_text} "
+    instr_run.append(instr)
+    runs += [instr_run, _fld_char_run(el_factory, "separate")]
+
+    shown = el_factory(W + "r")
+    if rpr is not None:
+        shown.append(copy.deepcopy(rpr))
+    t = el_factory(W + "t")
+    t.set(XML_SPACE, "preserve")
+    t.text = label
+    shown.append(t)
+    runs += [shown, _fld_char_run(el_factory, "end")]
+
+    return runs
+
+
+def _text_run(el_factory, value: str, rpr):
+    """A plain-text run in the surrounding formatting, for anything unresolved."""
+    r = el_factory(W + "r")
+    # copied, never moved: the source run is still in the paragraph and still
+    # owns its own formatting
+    if rpr is not None:
+        r.append(copy.deepcopy(rpr))
+    t = el_factory(W + "t")
+    t.set(XML_SPACE, "preserve")
+    t.text = value
+    r.append(t)
+    return r
+
+
+def _baseline_rpr(run):
+    """The run's formatting, with superscript stripped.
+
+    The superscript belongs to the notation being replaced, not to the citation
+    replacing it — and a superscripted field reads as a footnote marker.
+    """
+    rpr = run._r.find(W + "rPr")
+    if rpr is None:
+        return None
+    copied = copy.deepcopy(rpr)
+    for va in copied.findall(W + "vertAlign"):
+        copied.remove(va)
+    return copied
+
+
+def _apply_pieces(p, replacements: list[tuple[int, int, list[dict]]]) -> None:
+    """Replace citation spans with runs, rather than with text.
+
+    The text path can edit a run's characters in place; a field cannot, because
+    it *is* several runs. So the run holding the marker is split — the prefix
+    stays where it was, the field runs are inserted after it, and any tail
+    becomes a new run carrying the same formatting.
+
+    Right-to-left for the same reason _apply_spans is: the run map is computed
+    once from the original text, and editing from the end keeps earlier offsets
+    valid.
+    """
+    runs = p.runs
+    run_map = _run_spans(p)
+    el_factory = etree.Element
+
+    for s, e, pieces in sorted(replacements, key=lambda t: -t[0]):
+        touched = [(i, rs, re_) for i, rs, re_ in run_map if not (re_ <= s or rs >= e)]
+        if not touched:
+            continue
+
+        first_i, first_start, _ = touched[0]
+        first_run = runs[first_i]
+        rpr = _baseline_rpr(first_run)
+        last_i, last_start, last_end = touched[-1]
+        last_run = runs[last_i]
+        tail = last_run.text[min(e, last_end) - last_start:]
+        tail_rpr = last_run._r.find(W + "rPr")
+        tail_rpr = None if tail_rpr is None else copy.deepcopy(tail_rpr)
+
+        # Everything the span covers goes; the prefix of the first run stays.
+        first_run.text = first_run.text[:max(s, first_start) - first_start]
+        for i, _, _ in touched[1:]:
+            runs[i].text = ""
+
+        new_nodes = []
+        for piece in pieces:
+            if piece["kind"] == "field":
+                new_nodes += _field_runs(el_factory, piece["json"], piece["label"], rpr)
+            else:
+                new_nodes.append(_text_run(el_factory, piece["value"], rpr))
+        if tail:
+            new_nodes.append(_text_run(el_factory, tail, tail_rpr))
+
+        parent = first_run._r.getparent()
+        at = parent.index(first_run._r) + 1
+        for offset, node in enumerate(new_nodes):
+            parent.insert(at + offset, node)
+
+
+def mark_body_fields(doc, biblio_idx: int, render) -> int:
+    """Rewrite in-text citations as live Zotero fields. Returns fields written.
+
+    Takes a renderer built with `style="fields"`, which returns a list of pieces
+    rather than a string.
+    """
+    count = 0
+    for p in doc.paragraphs[:biblio_idx]:
+        if not p.text.strip():
+            continue
+        replacements = []
+        for s, e, spec in _citation_spans(p):
+            pieces = render(spec)
+            if pieces:
+                replacements.append((s, e, pieces))
+        if replacements:
+            _apply_pieces(p, replacements)
+            count += len(replacements)
+    return count
 
 
 def _is_math_superscript(text: str, start: int, end: int) -> bool:
@@ -238,6 +526,47 @@ def _run_spans(p) -> list[tuple[int, int, int]]:
     return spans
 
 
+def _detached_spans(text: str) -> list[tuple[int, int, str]]:
+    """Bare digits separated from the preceding word by a space, as citations.
+
+    Every rejection below is a guard against prose, in the order it is cheapest
+    to test. See PLAIN_DETACHED for why they are all needed.
+    """
+    out: list[tuple[int, int, str]] = []
+    for m in PLAIN_DETACHED.finditer(text):
+        word, punct, nums = m.group("word"), m.group("punct"), m.group("nums")
+        post = m.group("post")
+        low = word.lower()
+        if low in DETACHED_BLOCK:
+            continue
+        if low in DETACHED_TIME and not COUNTED_BEFORE.search(text[:m.start("word")]):
+            continue
+        # "10 mL", "0-100%", "4-6 times" — the digits are being measured.
+        if post and (post.isdigit() or post in "%/×−-–—"):
+            continue
+        if THOUSANDS.match(nums):
+            continue
+        tail = TRAILING_UNIT.match(text[m.end("nums"):])
+        if tail and tail.group(1).lower() in DETACHED_UNITS:
+            continue
+        vals = [int(v) for v in re.findall(r"\d+", nums)]
+        # No reference is numbered 0, and citation lists run upwards without
+        # repeating — "2, 3, 1 and 4 losses to follow-up" does neither.
+        if any(v == 0 for v in vals) or sorted(set(vals)) != vals:
+            continue
+        # "(baseline 62.14 ± 5.24" — the stop is a decimal point.
+        if post == "." and text[m.end("nums") + 1:m.end("nums") + 2].isdigit():
+            continue
+        ends_clause = post == "" or post in ".,;:!?"
+        # A bare number mid-sentence is prose ("25 patients were assigned"). It
+        # takes an ended sentence before it, an ended clause after it, or the
+        # comma-separated shape prose does not use.
+        if not ((punct in ".!?" if punct else False) or ends_clause or len(vals) > 1):
+            continue
+        out.append((m.start("nums"), m.end("nums"), nums))
+    return out
+
+
 def _citation_spans(p) -> list[tuple[int, int, str]]:
     """Locate every citation marker in a paragraph as (start, end, number_spec).
 
@@ -248,6 +577,7 @@ def _citation_spans(p) -> list[tuple[int, int, str]]:
       * bracketed groups          [1]  (2,3)  [4-6]
       * Unicode superscript chars ²³  ⁴²⁻⁴⁸
       * Word superscript runs     digits carrying superscript formatting
+      * plain digits              fused to punctuation, or space-separated
     """
     text = p.text
     found: list[tuple[int, int, str]] = []
@@ -260,6 +590,7 @@ def _citation_spans(p) -> list[tuple[int, int, str]]:
         found.append((m.start(), m.end(), m.group(0).translate(SUP)))
     for m in PLAIN_ATTACHED.finditer(text):
         found.append((m.start(1), m.end(1), m.group(1)))
+    found += _detached_spans(text)
 
     # Contiguous Word-superscript formatting, merged across run boundaries.
     runs = p.runs
@@ -328,6 +659,17 @@ def mark_body(doc, biblio_idx: int, render) -> int:
             _apply_spans(p, replacements)
             count += len(replacements)
     return count
+
+
+def count_citations(doc, biblio_idx: int) -> int:
+    """How many citation markers the body holds, without rewriting anything.
+
+    Asked before any resolution work, because zero is not a result worth several
+    minutes of searching — it means the document's citation notation was not
+    recognised, and continuing would delete a bibliography and put nothing in
+    its place.
+    """
+    return sum(len(_citation_spans(p)) for p in doc.paragraphs[:biblio_idx] if p.text.strip())
 
 
 def _has_image(el) -> bool:

@@ -12,10 +12,21 @@ The Python package it is ported from keeps its own name, `zotprep` — the file
 headers throughout `src/` name the module each one mirrors, and those references
 are meant to stay accurate.
 
+## Two documents come out
+
+The main download carries **live Zotero citations** — Word field codes the app
+writes itself, so the document is finished when it lands. A Scannable Cite copy
+is produced alongside for the ODF Scan route; it is a fallback, because that
+plugin converts by scanning `document.xml` as text and a picture's
+`uri="{GUID}"` attributes look exactly like the markers it hunts for.
+
 ## Every run writes to the library
 
-There is no dry-run mode. Three things do the work a preview pass used to:
+There is no dry-run mode. Four things do the work a preview pass used to:
 
+- **The document is checked before anything else.** A bibliography nothing
+  cites stops the run in milliseconds, with the library untouched — and the
+  reference list is never removed when nothing has replaced it.
 - **Credentials are verified before any resolution starts.** A wrong key fails
   in about two seconds rather than after several minutes of searching.
 - **Existing items are matched and reused**, on DOI and on normalised
@@ -51,7 +62,7 @@ python web/tools/parity/run_all.py
 | `extractor.js` | `zotprep/extractor.py` | exact parity on every ParsedRef field |
 | `scorer.js` | `zotprep/scorer.py` | exact parity: signals, confidence, accept, rank order |
 | `zip.js` | (python-docx internals) | round-trip: saved file re-opens and re-reads identically |
-| `docx.js` | `zotprep/docx_writer.py` | `tools/parity/docx_check.html`, against a Python-built fixture |
+| `docx.js` | `zotprep/docx_writer.py` | `tools/parity/docx_check.html`, against a Python-built fixture — including the Zotero field instructions, compared byte for byte; the detached-citation rule additionally by exact parity over a corpus and a guard bank |
 | `search/*.js` | `zotprep/search/*` | end-to-end run vs the CLI on the same document |
 | `resolver.js` | `zotprep/resolver.py` | end-to-end run vs the CLI on the same document |
 | `zotero.js` | `zotprep/zotero/client.py` | end-to-end (dry run) vs the CLI |

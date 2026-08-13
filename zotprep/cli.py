@@ -21,9 +21,11 @@ from . import config
 from .cache import Cache
 from .docx_writer import (
     biblio_end_index,
+    count_citations,
     find_biblio_index,
     make_renderer,
     mark_body,
+    mark_body_fields,
     parse_bibliography,
     remove_range,
 )
@@ -50,6 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read/write Zotero API key; else $ZOTERO_KEY, else saved config")
     ap.add_argument("--review", action="store_true",
                     help="prompt for anything not auto-accepted instead of leaving it flagged")
+    ap.add_argument("--style", choices=("fields", "scannable"), default="fields",
+                    help="fields: live Zotero citations, ready to open in Word (default). "
+                         "scannable: Scannable Cite markers for the ODF Scan plugin")
 
     creds = ap.add_argument_group("saved credentials")
     creds.add_argument("--save-credentials", action="store_true",
@@ -116,6 +121,19 @@ async def run(args) -> int:
     refs = {n: parse_reference(n, t) for n, t in raw_refs.items()}
     print(f"Parsed {len(refs)} references.")
 
+    # A bibliography with nothing citing it means the in-text notation was not
+    # recognised. Stop here: the alternative is minutes of resolution followed by
+    # a document whose reference list has been removed and nothing linked.
+    n_found = count_citations(doc, biblio_idx)
+    if not n_found:
+        sys.exit(
+            f"Parsed {len(refs)} references but found no citations in the body.\n"
+            "  Recognised notations are [1] and (2,3), superscript digits, and plain\n"
+            "  digits such as '...knee OA 2.' or '...analgesia 6,7.'\n"
+            "  Nothing was changed and no items were added."
+        )
+    print(f"Found {n_found} in-text citation markers.")
+
     cache = Cache(enabled=not args.no_cache)
     done = {"n": 0}
 
@@ -154,11 +172,20 @@ async def run(args) -> int:
 
     warnings: list[str] = []
     render = make_renderer(results, keys, args.zotero_userid or "0", refs=refs,
-                           warnings=warnings)
-    n_marked = mark_body(doc, biblio_idx, render)
-    if not args.bibliography:
+                           warnings=warnings, style=args.style)
+    if args.style == "fields":
+        n_marked = mark_body_fields(doc, biblio_idx, render)
+    else:
+        n_marked = mark_body(doc, biblio_idx, render)
+    # The reference list goes only when something has taken its place. Removing
+    # it after marking nothing would hand back a manuscript with no citations
+    # and no bibliography either.
+    if not args.bibliography and n_marked:
         remove_range(doc, biblio_idx, biblio_end)
-    out_docx = os.path.join(args.outdir, "manuscript_scannable.docx")
+    elif not args.bibliography:
+        print("No citations were rewritten — the bibliography has been left in place.")
+    name = "manuscript_zotero.docx" if args.style == "fields" else "manuscript_scannable.docx"
+    out_docx = os.path.join(args.outdir, name)
     doc.save(out_docx)
 
     report = os.path.join(args.outdir, "report.csv")
@@ -189,6 +216,9 @@ async def run(args) -> int:
     if unresolved:
         print(f"\n*** {len(unresolved)} reference(s) unresolved: {unresolved}")
         print("Marked '{NEEDS REVIEW: n}' in the document. Re-run with --review to fix interactively.")
+    elif args.style == "fields":
+        print("\nAll references resolved. The .docx has live Zotero citations — open it in "
+              "Word;\nZotero will ask for a citation style the first time you refresh.")
     else:
         print("\nAll references resolved. Next: Zotero > Tools > ODF Scan on the output .docx")
     cache.close()

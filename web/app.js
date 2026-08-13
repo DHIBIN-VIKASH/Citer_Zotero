@@ -232,7 +232,10 @@ function renderResults(out) {
   const base = (chosenFile.name || 'manuscript').replace(/\.docx$/i, '');
   els.downloads.innerHTML = '';
   for (const [blob, name, title, note] of [
-    [out.docxBlob, `${base}_scannable.docx`, 'Scannable manuscript', 'feed this to ODF Scan'],
+    [out.docxBlob, `${base}_zotero.docx`, 'Your manuscript, with live citations',
+      'open it in Word — nothing else to run'],
+    [out.scannableBlob, `${base}_scannable.docx`, 'ODF Scan copy',
+      'only if you want the plugin route'],
     [out.reportCsv, `${base}_report.csv`, 'Resolution report', 'one row per reference'],
   ]) {
     const url = URL.createObjectURL(blob);

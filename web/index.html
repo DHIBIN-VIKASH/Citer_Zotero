@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Z-Link — reference resolver for Zotero</title>
-<meta name="description" content="Resolve a manuscript's bibliography against Crossref, PubMed, OpenAlex, Europe PMC and Semantic Scholar, add the items to your Zotero library, and get back a Scannable Cite .docx. Runs entirely in your browser.">
+<meta name="description" content="Resolve a manuscript's bibliography against Crossref, PubMed, OpenAlex, Europe PMC and Semantic Scholar, add the items to your Zotero library, and get back a .docx with live Zotero citations in it. Runs entirely in your browser.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23F7F3EA'/><path d='M9 9h14L9 23h14' stroke='%239A6B12' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>">
 <style>
 /* ─────────────────────────────────────────────────────────────────────────
@@ -315,8 +315,8 @@ footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
         <span class="tagline">reference resolver for Zotero</span>
       </div>
       <p class="sub">Reads your manuscript's bibliography, finds each reference across five
-        indexes, adds the items to your Zotero library, and hands back a Scannable&nbsp;Cite
-        .docx ready for ODF&nbsp;Scan.</p>
+        indexes, adds the items to your Zotero library, and hands back a .docx whose
+        citations are live Zotero citations — open it in Word, nothing else to run.</p>
     </div>
     <div class="head-side">
       <button class="helpbtn" id="helpBtn"><span class="q">?</span> First time here</button>
@@ -389,8 +389,10 @@ footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
     </div>
 
     <div class="downloads" id="downloads"></div>
-    <p class="nextstep">Next: run ODF Scan in Zotero on the downloaded file.
-      <button id="helpOdfLink" type="button">Show me how</button></p>
+    <p class="nextstep">Next: open the manuscript in Word. The citations are live — Zotero
+      asks for a citation style the first time you refresh them, and
+      <b>Add/Edit&nbsp;Bibliography</b> rebuilds the reference list in that style.
+      <button id="helpOdfLink" type="button">Prefer the ODF Scan route?</button></p>
 
     <div id="review">
       <h3 class="sec">Decide the unresolved ones</h3>
@@ -479,9 +481,17 @@ footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
 
     <div class="guide" id="paneOdf" role="tabpanel" hidden>
       <h3>Install the ODF Scan plugin</h3>
-      <p>Z-Link gives you a .docx where every citation has been replaced by a Scannable Cite
-        marker — text like <code>{ | Marmot, (2005) | | |zu:1234567:ABCD1234}</code>. The ODF Scan
-        plugin is what turns those markers into real, live Zotero citations.</p>
+      <div class="callout"><b>You probably do not need this.</b> The main download,
+        <b>Your manuscript, with live citations</b>, already contains real Zotero citations —
+        open it in Word and they work. This second route exists for LibreOffice users and for
+        anyone who wants the markers to check before they become citations.
+        <br><br>One caution: if your manuscript contains <b>images</b>, ODF Scan can write a
+        citation into a picture's internal XML and produce a file Word refuses to open. That
+        is a limitation of the plugin, not of your document — the main download is unaffected.
+      </div>
+      <p>The ODF Scan copy is a .docx where every citation is a Scannable Cite marker — text
+        like <code>{ | Marmot, (2005) | | |zu:1234567:ABCD1234}</code>. The plugin turns those
+        markers into live Zotero citations.</p>
       <p>You only install it once. It needs <b>Zotero 7 or newer</b>.</p>
       <p class="getxpi">
         <a class="dl xpi" href="./vendor/zotero-odf-scan-v3.2.1.xpi"
@@ -512,8 +522,8 @@ footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
 
       <h3>Run the scan on your document</h3>
       <ol>
-        <li>Make sure the run finished and you downloaded the <b>Scannable manuscript</b> file
-          from Z-Link.</li>
+        <li>Make sure the run finished and you downloaded the <b>ODF Scan copy</b> from
+          Z-Link.</li>
         <li>In Zotero, go to <b>Tools → ODF Scan</b>.</li>
         <li>For <b>File type</b>, choose <b>ODF (to citations)</b> — that is the direction that
           turns markers into live citations.</li>

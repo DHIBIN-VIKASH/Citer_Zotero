@@ -228,6 +228,60 @@ const GROUP = /[[(]\s*([\d\s,\-–—]+?)\s*[\])]/g;
 // isn't a real reference number is dropped later by expand().
 const PLAIN_ATTACHED = /(?<=[A-Za-z][.;,!?])(\d{1,3}(?:\s*[-–—]\s*\d{1,3})?(?:\s*,\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)*)/g;
 
+// The same degradation, but with the space surviving:
+//
+//   "...in adults aged 45 years and older. 1 According to..."
+//   "...the disease burden being for knee OA 2."
+//   "...short-lived analgesia 6,7."
+//
+// This is what a superscript citation becomes when a manuscript is pasted as
+// plain text, and it is the one notation genuinely ambiguous with prose —
+// "25 patients", "Group 4", "for 12 months" have the same shape. So the match is
+// deliberately conservative, and every guard in detachedSpans() exists because a
+// real manuscript tripped over it. A missed citation leaves a visible
+// "{NEEDS REVIEW}"; a false one rewrites the author's sentence.
+const NUMS = '\\d{1,3}(?:\\s*[-–—]\\s*\\d{1,3})?(?:\\s*,\\s*\\d{1,3}(?:\\s*[-–—]\\s*\\d{1,3})?)*';
+const PLAIN_DETACHED = new RegExp(
+  `(?<word>[A-Za-z]+)(?<punct>[.;,!?])?[  ](?<nums>${NUMS})(?<post>.|$)`, 'g',
+);
+
+// Words that take a number as their *label* ("Group 4", "Table 2"), and function
+// words a citation never follows ("of 25", "than 12"). Either way the digits are
+// prose, not a reference.
+const DETACHED_BLOCK = new Set([
+  'group', 'groups', 'grade', 'grades', 'table', 'tables', 'figure', 'figures', 'fig',
+  'stage', 'phase', 'type', 'level', 'class', 'no', 'number', 'chapter', 'part',
+  'section', 'step', 'arm', 'visit', 'score', 'kl', 'n', 'p', 'r',
+  'version', 'item', 'question', 'page', 'line',
+  'of', 'to', 'in', 'at', 'for', 'from', 'by', 'with', 'than', 'up', 'over', 'under',
+  'about', 'approximately', 'and', 'or', 'was', 'were', 'is', 'are', 'be', 'been',
+  'into', 'onto', 'per', 'versus', 'vs', 'until', 'till', 'between', 'within',
+  'mean', 'median', 'total', 'only', 'all', 'aged', 'age', 'range', 'ratio',
+  'the', 'a', 'an', 'had', 'has', 'have', 'each', 'both', 'every', 'another',
+]);
+
+// Timepoints cut both ways: "By month 1," labels the timepoint, while "beyond
+// 3 months 6,8." is a unit that already took its number — what follows it is a
+// citation. The digit before the word is what separates them.
+const DETACHED_TIME = new Set([
+  'month', 'months', 'week', 'weeks', 'day', 'days', 'year', 'years',
+  'hour', 'hours', 'visit', 'visits', 'session', 'sessions', 'cycle', 'cycles',
+]);
+const COUNTED_BEFORE = /\d\s*$/;
+
+// A measurement the digits belong to rather than a citation: "1, 3, 6 and 12
+// months", "4-6 times baseline", "37 studies comprising 4,326 patients".
+const DETACHED_UNITS = new Set([
+  'month', 'months', 'week', 'weeks', 'day', 'days', 'year', 'years', 'hour', 'hours',
+  'minute', 'minutes', 'time', 'times', 'fold', 'patient', 'patients', 'case', 'cases',
+  'subject', 'subjects', 'participant', 'participants', 'study', 'studies', 'trial',
+  'trials', 'ml', 'mm', 'cm', 'mg', 'kg', 'g', 'l', 'percent', 'point', 'points',
+  'degree', 'degrees', 'unit', 'units', 'group', 'groups', 'session', 'sessions',
+  'injection', 'injections', 'site', 'sites', 'million', 'billion', 'thousand',
+]);
+const TRAILING_UNIT = /^[\s)]*(?:and\s+\d{1,3}\s+)?([A-Za-z]+)/;
+const THOUSANDS = /^\d{1,3},\d{3}$/;
+
 // Entry numbering: "1. Smith J", "[1] Smith J", "1) Smith J", and — as produced
 // by Lancet-family templates — "1<em-space>Smith J" with no delimiter at all.
 // The delimiter is therefore optional, but separating whitespace is not: without
@@ -314,7 +368,7 @@ function titleCase(s) {
  * and the document text is left untouched.
  */
 export function makeRenderer(resolutions, keys, uid, {
-  style = 'scannable', refs = null, warnings = null,
+  style = 'scannable', refs = null, warnings = null, newId = randomCitationId,
 } = {}) {
   function expand(spec) {
     const out = [];
@@ -368,22 +422,206 @@ export function makeRenderer(resolutions, keys, uid, {
     return `${who}, (${c.year || 'n.d.'})`;
   }
 
+  if (style !== 'fields') {
+    return function render(spec) {
+      const nums = expand(spec);
+      if (!nums.length) return null;
+      const parts = [];
+      for (const n of nums) {
+        const res = resolutions.get(n);
+        if (['ACCEPTED', 'FROM_TEXT'].includes(res.status) && keys.get(n)) {
+          parts.push(style === 'scannable'
+            ? `{ | ${label(n)} | | |zu:${uid}:${keys.get(n)}}`
+            : `{${label(n)}}`);
+        } else {
+          parts.push(`{NEEDS REVIEW: ref ${n}}`);
+        }
+      }
+      return parts.join('');
+    };
+  }
+
+  // Field output. One citation becomes one field however many references it
+  // carries, which is how Zotero models "6,7" — a single citation of two items.
+  // Anything unresolved stays visible text between the fields rather than being
+  // folded into one, so a half-resolved group cannot look fully resolved.
   return function render(spec) {
     const nums = expand(spec);
     if (!nums.length) return null;
-    const parts = [];
+    const pieces = [];
+    let items = [];
+    const flush = () => {
+      if (!items.length) return;
+      pieces.push({
+        kind: 'field',
+        json: citationJson(items, uid, newId()),
+        label: items.map((i) => i.label).join('; '),
+      });
+      items = [];
+    };
     for (const n of nums) {
       const res = resolutions.get(n);
       if (['ACCEPTED', 'FROM_TEXT'].includes(res.status) && keys.get(n)) {
-        parts.push(style === 'scannable'
-          ? `{ | ${label(n)} | | |zu:${uid}:${keys.get(n)}}`
-          : `{${label(n)}}`);
+        items.push({ key: keys.get(n), label: label(n) });
       } else {
-        parts.push(`{NEEDS REVIEW: ref ${n}}`);
+        flush();
+        pieces.push({ kind: 'text', value: `{NEEDS REVIEW: ref ${n}}` });
       }
     }
-    return parts.join('');
+    flush();
+    return pieces;
   };
+}
+
+// --- Zotero fields ------------------------------------------------------------
+//
+// A live Zotero citation in a .docx is a Word field, five runs long:
+//
+//   fldChar begin | instrText " ADDIN ZOTERO_ITEM CSL_CITATION {json} "
+//                 | fldChar separate | the visible text | fldChar end
+//
+// The JSON shape below is copied from a document Zotero itself produced — the
+// same keys, in the same order, with no additions. Zotero matches items by the
+// `uris` entry; everything else is what it shows before the first refresh.
+//
+// Writing these directly is what removes ODF Scan from the workflow. ODF Scan
+// finds its markers by scanning document.xml as a string, which is why a picture
+// whose XML happens to contain `uri="{...}"` can end up with a citation spliced
+// into the middle of an attribute, producing a file Word refuses to open.
+const CSL_SCHEMA = 'https://github.com/citation-style-language/schema/raw/master/csl-citation.json';
+const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+/** Zotero's citationID: eight characters, unique within the document. */
+export function randomCitationId(rng = Math.random) {
+  let out = '';
+  for (let i = 0; i < 8; i++) out += ID_ALPHABET[Math.floor(rng() * ID_ALPHABET.length)];
+  return out;
+}
+
+/**
+ * The CSL_CITATION payload for one citation, which may carry several items —
+ * "6,7" is a single citation of two references, not two citations.
+ */
+export function citationJson(items, uid, id) {
+  const shown = items.map((i) => i.label).join('; ');
+  return JSON.stringify({
+    citationID: id,
+    properties: { formattedCitation: shown, plainCitation: shown },
+    citationItems: items.map((i) => ({ uris: [`http://zotero.org/users/${uid}/items/${i.key}`] })),
+    schema: CSL_SCHEMA,
+  });
+}
+
+/** A `w:r` carrying one `w:fldChar`. */
+function fldCharRun(xml, type) {
+  const r = xml.createElementNS(W, 'w:r');
+  const fc = xml.createElementNS(W, 'w:fldChar');
+  fc.setAttributeNS(W, 'w:fldCharType', type);
+  r.appendChild(fc);
+  return r;
+}
+
+/**
+ * The five runs of one Zotero field.
+ *
+ * `rPr` is the formatting of the text being replaced, so the citation reads in
+ * the manuscript's font rather than Word's default — minus any superscript,
+ * which belongs to the notation being replaced and not to the citation.
+ */
+function fieldRuns(xml, json, label, rPr) {
+  const runs = [fldCharRun(xml, 'begin')];
+
+  const instr = xml.createElementNS(W, 'w:r');
+  const it = xml.createElementNS(W, 'w:instrText');
+  it.setAttributeNS(XML_NS, 'xml:space', 'preserve');
+  // textContent escapes for us, which is the whole point: the JSON is data, and
+  // a title containing "<" must not become markup.
+  it.textContent = ` ADDIN ZOTERO_ITEM CSL_CITATION ${json} `;
+  instr.appendChild(it);
+  runs.push(instr, fldCharRun(xml, 'separate'));
+
+  const shown = xml.createElementNS(W, 'w:r');
+  if (rPr) shown.appendChild(rPr.cloneNode(true));
+  const t = xml.createElementNS(W, 'w:t');
+  t.setAttributeNS(XML_NS, 'xml:space', 'preserve');
+  t.textContent = label;
+  shown.appendChild(t);
+  runs.push(shown, fldCharRun(xml, 'end'));
+
+  return runs;
+}
+
+/** A plain-text run in the surrounding formatting, for anything left unresolved. */
+function textRun(xml, value, rPr) {
+  const r = xml.createElementNS(W, 'w:r');
+  // cloned, never moved: the source run is still in the paragraph and still owns
+  // its own formatting
+  if (rPr) r.appendChild(rPr.cloneNode(true));
+  const t = xml.createElementNS(W, 'w:t');
+  t.setAttributeNS(XML_NS, 'xml:space', 'preserve');
+  t.textContent = value;
+  r.appendChild(t);
+  return r;
+}
+
+/** The run's formatting, with superscript stripped — see fieldRuns(). */
+function baselineRPr(run) {
+  const rPr = run ? run.rPr : null;
+  if (!rPr) return null;
+  const copy = rPr.cloneNode(true);
+  for (const child of [...copy.childNodes]) {
+    if (child.nodeType === 1 && child.namespaceURI === W && child.localName === 'vertAlign') {
+      copy.removeChild(child);
+    }
+  }
+  return copy;
+}
+
+/**
+ * Replace citation spans with runs, rather than with text.
+ *
+ * The text path can edit a run's characters in place; a field cannot, because it
+ * *is* several runs. So the run holding the marker is split — prefix stays where
+ * it was, the field runs are inserted after it, and any tail becomes a new run
+ * carrying the same formatting.
+ *
+ * Right-to-left for the same reason applySpans() is: the run map is computed
+ * once from the original text, and editing from the end keeps earlier offsets
+ * valid.
+ */
+function applyPieces(p, replacements) {
+  const xml = p.el.ownerDocument;
+  const runs = p.runs;
+  const map = runSpans(p);
+
+  for (const [s, e, pieces] of [...replacements].sort((a, b) => b[0] - a[0])) {
+    const touched = map.filter(([, rs, re]) => !(re <= s || rs >= e));
+    if (!touched.length) continue;
+
+    const [firstIdx, firstStart] = touched[0];
+    const firstRun = runs[firstIdx];
+    const rPr = baselineRPr(firstRun);
+    const firstText = firstRun.text;
+    const [lastIdx, lastStart, lastEnd] = touched[touched.length - 1];
+    const lastRun = runs[lastIdx];
+    const tail = lastRun.text.slice(Math.min(e, lastEnd) - lastStart);
+    const tailRPr = lastRun.rPr;
+
+    // Everything the span covers goes; the prefix of the first run stays.
+    firstRun.text = firstText.slice(0, Math.max(s, firstStart) - firstStart);
+    for (const [i] of touched.slice(1)) runs[i].text = '';
+
+    const frag = xml.createDocumentFragment();
+    for (const piece of pieces) {
+      if (piece.kind === 'field') {
+        for (const r of fieldRuns(xml, piece.json, piece.label, rPr)) frag.appendChild(r);
+      } else {
+        frag.appendChild(textRun(xml, piece.value, rPr));
+      }
+    }
+    if (tail) frag.appendChild(textRun(xml, tail, tailRPr));
+    firstRun.el.parentNode.insertBefore(frag, firstRun.el.nextSibling);
+  }
 }
 
 /**
@@ -429,11 +667,52 @@ function runSpans(p) {
 }
 
 /**
+ * Bare digits separated from the preceding word by a space, as citations.
+ *
+ * Every rejection below is a guard against prose, in the order it is cheapest to
+ * test. See PLAIN_DETACHED for why they are all needed.
+ */
+export function detachedSpans(text) {
+  const out = [];
+  for (const m of text.matchAll(PLAIN_DETACHED)) {
+    const { word, punct, nums, post } = m.groups;
+    const low = word.toLowerCase();
+    if (DETACHED_BLOCK.has(low)) continue;
+    const wordStart = m.index;
+    if (DETACHED_TIME.has(low) && !COUNTED_BEFORE.test(text.slice(0, wordStart))) continue;
+    // "10 mL", "0-100%", "4-6 times" — the digits are being measured.
+    if (post && (/\d/.test(post) || '%/×−-–—'.includes(post))) continue;
+    if (THOUSANDS.test(nums)) continue;
+    const numsStart = m.index + m[0].indexOf(nums, word.length);
+    const numsEnd = numsStart + nums.length;
+    const tail = TRAILING_UNIT.exec(text.slice(numsEnd));
+    if (tail && DETACHED_UNITS.has(tail[1].toLowerCase())) continue;
+    const vals = (nums.match(/\d+/g) || []).map(Number);
+    // No reference is numbered 0, and citation lists run upwards without
+    // repeating — "2, 3, 1 and 4 losses to follow-up" does neither.
+    if (vals.some((v) => v === 0)) continue;
+    const ascending = [...new Set(vals)].sort((a, b) => a - b);
+    if (ascending.length !== vals.length || ascending.some((v, i) => v !== vals[i])) continue;
+    // "(baseline 62.14 ± 5.24" — the stop is a decimal point.
+    if (post === '.' && /\d/.test(text.slice(numsEnd + 1, numsEnd + 2))) continue;
+    const endsClause = post === '' || '.,;:!?'.includes(post);
+    // A bare number mid-sentence is prose ("25 patients were assigned"). It takes
+    // an ended sentence before it, an ended clause after it, or the
+    // comma-separated shape prose does not use.
+    if (!((punct && '.!?'.includes(punct)) || endsClause || vals.length > 1)) continue;
+    out.push([numsStart, numsEnd, nums]);
+  }
+  return out;
+}
+
+/**
  * Locate every citation marker in a paragraph as [start, end, numberSpec].
  *
  * Works in paragraph-text coordinates rather than per-run, because Word freely
  * splits a single citation across runs — "statement;²" + "⁰" is one citation,
- * and no per-run scan can see it.
+ * and no per-run scan can see it. Four notations are recognised: bracketed
+ * groups, Unicode superscripts, Word superscript runs, and plain digits (fused
+ * to punctuation or space-separated).
  */
 function citationSpans(p) {
   const text = p.text;
@@ -450,6 +729,7 @@ function citationSpans(p) {
     const s = m.index + m[0].indexOf(m[1]);
     found.push([s, s + m[1].length, m[1]]);
   }
+  found.push(...detachedSpans(text));
 
   // Contiguous Word-superscript formatting, merged across run boundaries.
   const runs = p.runs;
@@ -506,6 +786,62 @@ function applySpans(p, replacements) {
       runs[i].superscript = false;
     }
   }
+}
+
+/**
+ * True when the document contains a picture, chart or embedded object.
+ *
+ * Only the ODF Scan route cares. That plugin finds its markers by scanning
+ * document.xml as a string, and a picture carries `uri="{...}"` attributes of
+ * exactly the shape it is looking for — one manuscript came back with a citation
+ * spliced into the middle of an image attribute and Word refused to open it.
+ */
+export function hasImages(doc) {
+  const body = doc.body;
+  if (!body) return false;
+  for (const tag of ['drawing', 'pict', 'object']) {
+    if (body.getElementsByTagNameNS(W, tag).length) return true;
+  }
+  return false;
+}
+
+/**
+ * How many citation markers the body holds, without rewriting anything.
+ *
+ * Asked before any resolution work, because zero is not a result worth several
+ * minutes of searching — it means the document's citation notation was not
+ * recognised, and continuing would delete a bibliography and put nothing in its
+ * place.
+ */
+export function countCitations(doc, biblioIdx) {
+  let n = 0;
+  for (const p of doc.paragraphs.slice(0, biblioIdx)) {
+    if (p.text.trim()) n += citationSpans(p).length;
+  }
+  return n;
+}
+
+/**
+ * Rewrite in-text citations as live Zotero fields. Returns fields written.
+ *
+ * Takes a renderer built with `style: 'fields'`, which returns a list of pieces
+ * rather than a string.
+ */
+export function markBodyFields(doc, biblioIdx, render) {
+  let count = 0;
+  for (const p of doc.paragraphs.slice(0, biblioIdx)) {
+    if (!p.text.trim()) continue;
+    const replacements = [];
+    for (const [s, e, spec] of citationSpans(p)) {
+      const pieces = render(spec);
+      if (pieces && pieces.length) replacements.push([s, e, pieces]);
+    }
+    if (replacements.length) {
+      applyPieces(p, replacements);
+      count += replacements.length;
+    }
+  }
+  return count;
 }
 
 /** Rewrite in-text citations before the bibliography. Returns markers written. */
