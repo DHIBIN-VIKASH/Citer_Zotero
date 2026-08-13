@@ -345,6 +345,13 @@ Written to `zot_out/` (or `--outdir`); downloaded directly in the browser.
 | `manuscript_scannable.docx` | The same document with Scannable Cite markers `{ \| Author, (Year) \| \| \|zu:USERID:ITEMKEY}` instead, for the ODF Scan plugin. CLI: `--style scannable`. The browser produces both |
 | `report.csv` | `n, status, tier, confidence, doi, pmid, zotero_key, resolved_title, reason, advisory, raw_reference` |
 
+At review, an unresolved reference has four answers: pick a candidate, paste a DOI, build
+it from the reference text (books only), or leave it flagged. A fifth, **delete this
+citation** (`[x]` at the CLI prompt), is for a reference that is in the list but should not
+be cited here — the marker comes out of the sentence and nothing replaces it, taking its
+spacing with it so `…knee OA 2.` closes as `…knee OA.` rather than `…knee OA .`. Deleting
+one reference out of `1,2,3` leaves the other two citations untouched.
+
 One citation, however many references it carries: `6,7` becomes a single field of two
 items, which is how Zotero models it. A group where only some references resolved is split
 — the resolved part becomes a field, the rest stays a visible `{NEEDS REVIEW: n}`, so a

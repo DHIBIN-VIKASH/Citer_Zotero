@@ -81,7 +81,7 @@ try {
   const resolutions = new Map();
   const keys = new Map();
   for (const n of raw.keys()) {
-    const status = n === 6 ? 'REVIEW' : 'ACCEPTED';
+    const status = n === 6 ? 'REVIEW' : (n === 7 ? 'DROPPED' : 'ACCEPTED');
     resolutions.set(n, {
       status,
       candidate: status === 'REVIEW' ? null : {
@@ -90,7 +90,7 @@ try {
         authors: [`surname${n}`],
       },
     });
-    if (n !== 6) keys.set(n, `KEY${String(n).padStart(3, '0')}`);
+    if (n !== 6 && n !== 7) keys.set(n, `KEY${String(n).padStart(3, '0')}`);
   }
 
   const warnings = [];

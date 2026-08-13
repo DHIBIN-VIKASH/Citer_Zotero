@@ -210,6 +210,7 @@ const BADGE = {
   ACCEPTED: ['b-acc', 'in zotero'],
   FROM_TEXT: ['b-txt', 'from text'],
   REVIEW: ['b-rev', 'review'],
+  DROPPED: ['b-txt', 'deleted'],
 };
 
 function renderResults(out) {
@@ -376,6 +377,21 @@ function renderReview(out) {
       renderReview(out);
     });
     actions.appendChild(skip);
+
+    // For a reference that is in the list but should not be cited here: the
+    // marker comes out of the sentence rather than staying as a flag.
+    const drop = document.createElement('button');
+    drop.className = 'mini';
+    drop.textContent = 'Delete this citation';
+    drop.addEventListener('click', () => {
+      decisions.set(n, {
+        kind: 'drop',
+        payload: {},
+        label: 'deleted — the citation is removed from the text',
+      });
+      renderReview(out);
+    });
+    actions.appendChild(drop);
 
     const doiBtn = document.createElement('button');
     doiBtn.className = 'mini';

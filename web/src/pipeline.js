@@ -142,7 +142,10 @@ export async function finish(state, opts, cb = {}) {
 
   const ordered = [...results.keys()].sort((a, b) => a - b);
   const accepted = ordered.filter((n) => ['ACCEPTED', 'FROM_TEXT'].includes(results.get(n).status));
-  const unresolved = ordered.filter((n) => !accepted.includes(n));
+  // A reference deleted at review is decided, not outstanding — counting it as
+  // unresolved would keep reporting a problem the reader has already settled.
+  const dropped = ordered.filter((n) => results.get(n).status === 'DROPPED');
+  const unresolved = ordered.filter((n) => !accepted.includes(n) && !dropped.includes(n));
 
   // upgrade winning candidates to canonical Crossref records for item quality
   onStage('fetching canonical metadata');
@@ -247,6 +250,7 @@ export async function finish(state, opts, cb = {}) {
       total: refs.size,
       accepted: accepted.length,
       unresolved,
+      dropped,
       nMarked,
       created,
       reused,

@@ -150,7 +150,9 @@ async def run(args) -> int:
         review_loop(refs, results, cache)
 
     accepted = [n for n in sorted(results) if results[n].status in ("ACCEPTED", "FROM_TEXT")]
-    unresolved = [n for n in sorted(results) if n not in accepted]
+    # A reference deleted at review is decided, not outstanding.
+    dropped = [n for n in sorted(results) if results[n].status == "DROPPED"]
+    unresolved = [n for n in sorted(results) if n not in accepted and n not in dropped]
 
     # upgrade winning candidates to canonical Crossref records for item quality
     async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=30.0,
@@ -213,6 +215,9 @@ async def run(args) -> int:
         print("\n*** In-text citation problems (document left unchanged at these spots):")
         for w in dict.fromkeys(warnings):
             print(f"  - {w}")
+    if dropped:
+        print(f"\n{len(dropped)} citation(s) deleted at review: {dropped} "
+              "— the markers were removed from the text.")
     if unresolved:
         print(f"\n*** {len(unresolved)} reference(s) unresolved: {unresolved}")
         print("Marked '{NEEDS REVIEW: n}' in the document. Re-run with --review to fix interactively.")

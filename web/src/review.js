@@ -11,6 +11,7 @@
  *   paste a DOI           -> ACCEPTED, tier "manual",         confidence 1.0
  *   build from the text   -> FROM_TEXT, tier "book-from-text", confidence 0.80
  *   skip                  -> unchanged; stays flagged in the document
+ *   delete                -> DROPPED; the marker comes out of the text
  *
  * One deliberate difference: the CLI reviews everything that is not ACCEPTED,
  * which includes FROM_TEXT entries. Here only REVIEW entries are offered, so a
@@ -85,10 +86,19 @@ export function candidateFromDoi(ref, doi) {
 /**
  * Apply one decision to a Resolution, in place.
  *
- * @param {'candidate'|'doi'|'from-text'|'skip'} kind
+ * @param {'candidate'|'doi'|'from-text'|'skip'|'drop'} kind
  * @param {object} payload  { candidate } | { doi } | {}
  */
 export function applyDecision(res, ref, kind, payload = {}) {
+  if (kind === 'drop') {
+    // The reference is in the list but the citation is not wanted: the marker
+    // comes out of the text and nothing replaces it.
+    res.status = 'DROPPED';
+    res.tier = 'none';
+    res.candidate = null;
+    res.reviewed = 'deleted from the text';
+    return res;
+  }
   if (kind === 'skip') {
     res.status = 'REVIEW';
     res.tier = 'none';

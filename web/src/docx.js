@@ -434,6 +434,10 @@ export function makeRenderer(resolutions, keys, uid, {
       const parts = [];
       for (const n of nums) {
         const res = resolutions.get(n);
+        // Deleted at review: the reference contributes nothing. When every
+        // reference in the group was deleted the result is "", which is a
+        // deletion — distinct from null, which leaves the text alone.
+        if (res.status === 'DROPPED') continue;
         if (['ACCEPTED', 'FROM_TEXT'].includes(res.status) && keys.get(n)) {
           parts.push(style === 'scannable'
             ? `{ | ${label(n)} | | |zu:${uid}:${keys.get(n)}}`
@@ -466,6 +470,7 @@ export function makeRenderer(resolutions, keys, uid, {
     };
     for (const n of nums) {
       const res = resolutions.get(n);
+      if (res.status === 'DROPPED') continue;
       if (['ACCEPTED', 'FROM_TEXT'].includes(res.status) && keys.get(n)) {
         items.push({ key: keys.get(n), label: label(n) });
       } else {
@@ -474,6 +479,8 @@ export function makeRenderer(resolutions, keys, uid, {
       }
     }
     flush();
+    // An empty list is a deletion — every reference in the group was deleted at
+    // review. null, by contrast, leaves the text alone.
     return pieces;
   };
 }
@@ -836,10 +843,13 @@ export function markBodyFields(doc, biblioIdx, render) {
   let count = 0;
   for (const p of doc.paragraphs.slice(0, biblioIdx)) {
     if (!p.text.trim()) continue;
+    const text = p.text;
     const replacements = [];
     for (const [s, e, spec] of citationSpans(p)) {
       const pieces = render(spec);
       if (pieces && pieces.length) replacements.push([s, e, pieces]);
+      // every reference in this citation was deleted at review
+      else if (pieces) replacements.push([...deletionSpan(text, s, e), []]);
     }
     if (replacements.length) {
       applyPieces(p, replacements);
@@ -849,15 +859,34 @@ export function markBodyFields(doc, biblioIdx, render) {
   return count;
 }
 
+/**
+ * Widen a span whose replacement is empty, to take its spacing with it.
+ *
+ * A citation marker is written against the word before it — "knee OA 2." — so
+ * removing just the digits leaves "knee OA ." or a double space. The space in
+ * front belongs to the marker whenever what follows is punctuation, another
+ * space, or the end of the paragraph.
+ */
+export function deletionSpan(text, s, e) {
+  const after = e < text.length ? text[e] : '';
+  if (s > 0 && text[s - 1] === ' ' && (after === '' || after === ' ' || '.,;:!?)]'.includes(after))) {
+    return [s - 1, e];
+  }
+  return [s, e];
+}
+
 /** Rewrite in-text citations before the bibliography. Returns markers written. */
 export function markBody(doc, biblioIdx, render) {
   let count = 0;
   for (const p of doc.paragraphs.slice(0, biblioIdx)) {
     if (!p.text.trim()) continue;
+    const text = p.text;
     const replacements = [];
     for (const [s, e, spec] of citationSpans(p)) {
       const rep = render(spec);
       if (rep) replacements.push([s, e, rep]);
+      // every reference in this citation was deleted at review
+      else if (rep === '') replacements.push([...deletionSpan(text, s, e), '']);
     }
     if (replacements.length) {
       applySpans(p, replacements);

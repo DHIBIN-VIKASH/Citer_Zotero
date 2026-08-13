@@ -50,6 +50,7 @@ def review_loop(
         prompt = "  choose 1-%d / [s]kip / [d]oi / " % len(options) if options else "  [s]kip / [d]oi / "
         if ref.is_book:
             prompt += "[b]uild from reference text / "
+        prompt += "[x] delete this citation / "
         prompt = prompt.rstrip("/ ") + ": "
 
         while True:
@@ -60,6 +61,12 @@ def review_loop(
                 ans = "s"
             if ans in ("s", ""):
                 print("  skipped — stays flagged in the document")
+                break
+            if ans == "x":
+                # The reference is in the list but the citation is not wanted:
+                # the marker comes out of the text and nothing replaces it.
+                res.status, res.tier, res.candidate = "DROPPED", "none", None
+                print("  deleted — the citation marker is removed from the text")
                 break
             if ans == "b" and ref.is_book:
                 cand = book_from_text(ref)

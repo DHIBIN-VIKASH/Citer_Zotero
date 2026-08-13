@@ -115,6 +115,10 @@ def build() -> Path:
     # 7. An oversized range: a dropped digit, which must be refused.
     doc.add_paragraph(f"A dropped digit produces{sup('3')}⁻{sup('3')}{sup('2')} a huge span.")
 
+    # 7b. A citation of nothing but the reference deleted at review, so the whole
+    #     marker goes and the sentence has to close cleanly around the gap.
+    doc.add_paragraph("A source later withdrawn 7. The sentence must still read.")
+
     # 8. A year range that is not a citation at all.
     doc.add_paragraph("Between (1990-2023) the trend held.")
 
@@ -202,10 +206,17 @@ def main() -> int:
     biblio = "\n".join(p.text for p in doc.paragraphs[idx + 1:end])
     raw = parse_bibliography(biblio)
 
-    # Reference 6 is deliberately left unresolved, so the "{NEEDS REVIEW}" branch
-    # is exercised alongside the live-marker one.
-    resolutions = {n: StubResolution(n, "REVIEW" if n == 6 else "ACCEPTED") for n in raw}
-    keys = {n: f"KEY{n:03d}" for n in raw if n != 6}
+    # Reference 6 is deliberately left unresolved and reference 7 deleted at
+    # review, so the "{NEEDS REVIEW}" branch and the deletion branch — including
+    # the spacing a removed marker takes with it — are both exercised alongside
+    # the live-marker one.
+    def stub_status(n):
+        if n == 6:
+            return "REVIEW"
+        return "DROPPED" if n == 7 else "ACCEPTED"
+
+    resolutions = {n: StubResolution(n, stub_status(n)) for n in raw}
+    keys = {n: f"KEY{n:03d}" for n in raw if n not in (6, 7)}
 
     warnings: list[str] = []
     render = make_renderer(resolutions, keys, "1234567", refs=None, warnings=warnings)

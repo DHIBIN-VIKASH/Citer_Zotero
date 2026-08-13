@@ -256,6 +256,11 @@ def make_renderer(
         parts = []
         for n in nums:
             res = resolutions[n]
+            # Deleted at review: the reference contributes nothing. When every
+            # reference in the group was deleted the result is "", which is a
+            # deletion — distinct from None, which leaves the text alone.
+            if res.status == "DROPPED":
+                continue
             if res.status in ("ACCEPTED", "FROM_TEXT") and keys.get(n):
                 if style == "scannable":
                     parts.append(f"{{ | {label(n)} | | |zu:{uid}:{keys[n]}}}")
@@ -290,12 +295,16 @@ def make_renderer(
 
         for n in nums:
             res = resolutions[n]
+            if res.status == "DROPPED":
+                continue
             if res.status in ("ACCEPTED", "FROM_TEXT") and keys.get(n):
                 items.append({"key": keys[n], "label": label(n)})
             else:
                 flush()
                 pieces.append({"kind": "text", "value": f"{{NEEDS REVIEW: ref {n}}}"})
         flush()
+        # An empty list is a deletion — every reference in the group was deleted
+        # at review. None, by contrast, leaves the text alone.
         return pieces
 
     make_id = new_id or random_citation_id
@@ -474,10 +483,14 @@ def mark_body_fields(doc, biblio_idx: int, render) -> int:
     for p in doc.paragraphs[:biblio_idx]:
         if not p.text.strip():
             continue
+        text = p.text
         replacements = []
         for s, e, spec in _citation_spans(p):
             pieces = render(spec)
-            if pieces:
+            if pieces == []:
+                # every reference in this citation was deleted at review
+                replacements.append((*deletion_span(text, s, e), []))
+            elif pieces:
                 replacements.append((s, e, pieces))
         if replacements:
             _apply_pieces(p, replacements)
@@ -651,16 +664,34 @@ def _apply_spans(p, replacements: list[tuple[int, int, str]]) -> None:
             runs[i].font.superscript = False
 
 
+def deletion_span(text: str, s: int, e: int) -> tuple[int, int]:
+    """Widen a span whose replacement is empty, to take its spacing with it.
+
+    A citation marker is written against the word before it — "knee OA 2." —
+    so removing just the digits leaves "knee OA ." or a double space. The space
+    in front belongs to the marker whenever what follows is punctuation, another
+    space, or the end of the paragraph.
+    """
+    after = text[e] if e < len(text) else ""
+    if s > 0 and text[s - 1] == " " and (after == "" or after == " " or after in ".,;:!?)]"):
+        return s - 1, e
+    return s, e
+
+
 def mark_body(doc, biblio_idx: int, render) -> int:
     """Rewrite in-text citations before the bibliography. Returns markers written."""
     count = 0
     for p in doc.paragraphs[:biblio_idx]:
         if not p.text.strip():
             continue
+        text = p.text
         replacements = []
         for s, e, spec in _citation_spans(p):
             rep = render(spec)
-            if rep:
+            if rep == "":
+                # every reference in this citation was deleted at review
+                replacements.append((*deletion_span(text, s, e), ""))
+            elif rep:
                 replacements.append((s, e, rep))
         if replacements:
             _apply_spans(p, replacements)
