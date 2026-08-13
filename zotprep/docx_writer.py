@@ -208,6 +208,13 @@ def make_renderer(
                 a, b = chunk.split("-", 1)
                 if a.strip().isdigit() and b.strip().isdigit():
                     lo, hi = int(a), int(b)
+                    # No reference is numbered 0, so a range starting there is a
+                    # measurement scale: "VAS (0-10)", "KOOS total (0-100)". The
+                    # wide ones are refused as implausible ranges below, but a
+                    # narrow "(0-5)" would otherwise expand into five citations
+                    # the author never wrote.
+                    if lo == 0:
+                        return []
                     if lo not in resolutions and hi not in resolutions:
                         # Neither endpoint is a reference number, so this is
                         # ordinary prose — a year span like "(1990-2023)" or a

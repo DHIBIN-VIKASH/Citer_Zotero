@@ -162,7 +162,20 @@ def main() -> int:
     if " and confirmed since." not in reopened2.paragraphs[0].text:
         failures.append("  text after a superscript citation was lost")
 
-    total = 12
+    # 6. A measurement scale is a bracketed range of exactly the citation shape.
+    #    "(0-10)" is refused for spanning too many references, but "(0-5)" is
+    #    narrow enough to pass that test — no reference numbered zero is what
+    #    stops it becoming five citations the author never wrote.
+    ids = iter(f"ID{n:06d}" for n in range(1, 999))
+    render = make_renderer(resolutions, keys, "1234567", style="fields",
+                           refs=None, warnings=[], new_id=lambda: next(ids))
+    for spec in ("0-5", "0-10", "0-100"):
+        if render(spec):
+            failures.append(f"  scale {spec!r} was read as a citation")
+    if not render("1,2"):
+        failures.append("  a real citation list stopped rendering")
+
+    total = 16
     if failures:
         print(f"FAIL  fields: {len(failures)} problems")
         print("\n".join(failures))

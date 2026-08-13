@@ -118,6 +118,12 @@ def build() -> Path:
     # 8. A year range that is not a citation at all.
     doc.add_paragraph("Between (1990-2023) the trend held.")
 
+    # 8b. Measurement scales, which are bracketed ranges of exactly the citation
+    #     shape. The wide ones are refused as implausible spans; "(0-5)" is
+    #     narrow enough to pass that test and is caught only because no
+    #     reference is numbered zero.
+    doc.add_paragraph("Pain was scored on the VAS (0-10) and function on a subscale (0-5).")
+
     doc.add_paragraph("References")
     doc.add_paragraph("1. Barro RJ, Sala-i-Martin X. Convergence. J Polit Econ. 1992;100(2):223-51.")
     doc.add_paragraph("2. Marmot M. Social determinants of health. Lancet. 2005;365(9464):1099-104.")

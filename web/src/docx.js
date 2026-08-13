@@ -381,6 +381,11 @@ export function makeRenderer(resolutions, keys, uid, {
         if (isPyDigitString(a.trim()) && isPyDigitString(b.trim())) {
           const lo = parseInt(a, 10);
           const hi = parseInt(b, 10);
+          // No reference is numbered 0, so a range starting there is a
+          // measurement scale: "VAS (0-10)", "KOOS total (0-100)". The wide ones
+          // are refused as implausible ranges below, but a narrow "(0-5)" would
+          // otherwise expand into five citations the author never wrote.
+          if (lo === 0) return [];
           if (!resolutions.has(lo) && !resolutions.has(hi)) {
             // Neither endpoint is a reference number, so this is ordinary prose
             // — a year span like "(1990-2023)" or a value range. Not a citation,
