@@ -370,7 +370,7 @@ function titleCase(s) {
 export function makeRenderer(resolutions, keys, uid, {
   style = 'scannable', refs = null, warnings = null, newId = randomCitationId,
 } = {}) {
-  function expand(spec) {
+  function expand(spec, bracketed = false) {
     const out = [];
     for (const rawChunk of spec.replace(/–/g, '-').replace(/—/g, '-').split(',')) {
       const chunk = rawChunk.trim();
@@ -392,7 +392,11 @@ export function makeRenderer(resolutions, keys, uid, {
             // and not worth a warning.
             return [];
           }
-          if (hi - lo > MAX_RANGE_SPAN) {
+          if (hi - lo > MAX_RANGE_SPAN && !bracketed) {
+            // A wide *superscript* range is a dropped digit: the notation is
+            // exactly where a leading digit goes missing when formatting is
+            // lost, and expanding it would manufacture citations the author
+            // never made.
             if (warnings) {
               warnings.push(
                 `range '${lo}-${hi}' spans ${hi - lo + 1} references — `
@@ -400,6 +404,16 @@ export function makeRenderer(resolutions, keys, uid, {
               );
             }
             return [];
+          }
+          if (hi - lo > MAX_RANGE_SPAN && warnings) {
+            // Brackets are typed deliberately, and a systematic review really
+            // does cite its included studies this way: "included in both
+            // syntheses [14-49]". Taken as written, but reported, because it is
+            // a lot of citations to make from one marker.
+            warnings.push(
+              `range '${lo}-${hi}' expands to ${hi - lo + 1} references — `
+              + 'bracketed, so taken as written; check it is not a typo',
+            );
           }
           for (let n = lo; n <= hi; n++) out.push(n);
         }
@@ -428,8 +442,8 @@ export function makeRenderer(resolutions, keys, uid, {
   }
 
   if (style !== 'fields') {
-    return function render(spec) {
-      const nums = expand(spec);
+    return function render(spec, bracketed = false) {
+      const nums = expand(spec, bracketed);
       if (!nums.length) return null;
       const parts = [];
       for (const n of nums) {
@@ -454,8 +468,8 @@ export function makeRenderer(resolutions, keys, uid, {
   // carries, which is how Zotero models "6,7" — a single citation of two items.
   // Anything unresolved stays visible text between the fields rather than being
   // folded into one, so a half-resolved group cannot look fully resolved.
-  return function render(spec) {
-    const nums = expand(spec);
+  return function render(spec, bracketed = false) {
+    const nums = expand(spec, bracketed);
     if (!nums.length) return null;
     const pieces = [];
     let items = [];
@@ -730,18 +744,20 @@ function citationSpans(p) {
   const text = p.text;
   const found = [];
 
-  for (const m of text.matchAll(GROUP)) found.push([m.index, m.index + m[0].length, m[1]]);
+  for (const m of text.matchAll(GROUP)) {
+    found.push([m.index, m.index + m[0].length, m[1], true]);
+  }
   for (const m of text.matchAll(SUPRUN)) {
     const s = m.index;
     const e = m.index + m[0].length;
     if (isMathSuperscript(text, s, e)) continue;
-    found.push([s, e, translateSup(m[0])]);
+    found.push([s, e, translateSup(m[0]), false]);
   }
   for (const m of text.matchAll(PLAIN_ATTACHED)) {
     const s = m.index + m[0].indexOf(m[1]);
-    found.push([s, s + m[1].length, m[1]]);
+    found.push([s, s + m[1].length, m[1], false]);
   }
-  found.push(...detachedSpans(text));
+  for (const [s, e, spec] of detachedSpans(text)) found.push([s, e, spec, false]);
 
   // Contiguous Word-superscript formatting, merged across run boundaries.
   const runs = p.runs;
@@ -750,19 +766,19 @@ function citationSpans(p) {
     const isSup = runs[i].superscript === true && Boolean(runs[i].text.trim());
     if (isSup && start === null) start = s;
     else if (!isSup && start !== null) {
-      found.push([start, s, text.slice(start, s)]);
+      found.push([start, s, text.slice(start, s), false]);
       start = null;
     }
   }
-  if (start !== null) found.push([start, text.length, text.slice(start)]);
+  if (start !== null) found.push([start, text.length, text.slice(start), false]);
 
   // Drop overlaps, preferring the earliest and longest match.
   found.sort((a, b) => (a[0] - b[0]) || ((b[1] - b[0]) - (a[1] - a[0])));
   const out = [];
   let lastEnd = -1;
-  for (const [s, e, spec] of found) {
+  for (const [s, e, spec, bracketed] of found) {
     if (s < lastEnd || !/\d/.test(spec)) continue;
-    out.push([s, e, spec]);
+    out.push([s, e, spec, bracketed]);
     lastEnd = e;
   }
   return out;
@@ -845,8 +861,8 @@ export function markBodyFields(doc, biblioIdx, render) {
     if (!p.text.trim()) continue;
     const text = p.text;
     const replacements = [];
-    for (const [s, e, spec] of citationSpans(p)) {
-      const pieces = render(spec);
+    for (const [s, e, spec, bracketed] of citationSpans(p)) {
+      const pieces = render(spec, bracketed);
       if (pieces && pieces.length) replacements.push([s, e, pieces]);
       // every reference in this citation was deleted at review
       else if (pieces) replacements.push([...deletionSpan(text, s, e), []]);
@@ -882,8 +898,8 @@ export function markBody(doc, biblioIdx, render) {
     if (!p.text.trim()) continue;
     const text = p.text;
     const replacements = [];
-    for (const [s, e, spec] of citationSpans(p)) {
-      const rep = render(spec);
+    for (const [s, e, spec, bracketed] of citationSpans(p)) {
+      const rep = render(spec, bracketed);
       if (rep) replacements.push([s, e, rep]);
       // every reference in this citation was deleted at review
       else if (rep === '') replacements.push([...deletionSpan(text, s, e), '']);

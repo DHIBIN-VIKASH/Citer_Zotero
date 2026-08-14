@@ -115,6 +115,10 @@ def build() -> Path:
     # 7. An oversized range: a dropped digit, which must be refused.
     doc.add_paragraph(f"A dropped digit produces{sup('3')}⁻{sup('3')}{sup('2')} a huge span.")
 
+    # 7c. The same width in brackets, which is how a systematic review cites its
+    #     included studies — taken as written rather than refused.
+    doc.add_paragraph("Every included study is cited together [1-10] in the flow diagram.")
+
     # 7b. A citation of nothing but the reference deleted at review, so the whole
     #     marker goes and the sentence has to close cleanly around the gap.
     doc.add_paragraph("A source later withdrawn 7. The sentence must still read.")

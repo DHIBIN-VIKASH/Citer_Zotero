@@ -193,14 +193,16 @@ def make_renderer(
     With `style="fields"` the replacement is a list of pieces for
     `mark_body_fields`; otherwise it is the marker text `mark_body` writes.
 
-    Oversized ranges are refused rather than expanded. A superscript range
-    spanning dozens of references is a dropped digit in the manuscript
-    ("\\u00b3\\u207b\\u00b3\\u00b2" where "\\u00b3\\u00b9\\u207b\\u00b3\\u00b2" was meant), and expanding it would
-    manufacture 30 citations the author never made. Those are collected in
-    `warnings` for the caller to report, and the document text is left untouched.
+    Oversized ranges are refused rather than expanded — but only in the notation
+    where they are a mistake. A superscript range spanning dozens of references
+    is a dropped digit ("\\u00b3\\u207b\\u00b3\\u00b2" where "\\u00b3\\u00b9\\u207b\\u00b3\\u00b2" was meant), because that
+    is the notation a leading digit goes missing from. Brackets are typed
+    deliberately, and a systematic review genuinely cites its included studies
+    as "[14-49]", so a wide bracketed range is taken as written and reported
+    rather than refused. Both kinds of note go to `warnings` for the caller.
     """
 
-    def expand(spec: str) -> list[int]:
+    def expand(spec: str, bracketed: bool = False) -> list[int]:
         out: list[int] = []
         for chunk in spec.replace("–", "-").replace("—", "-").split(","):
             chunk = chunk.strip()
@@ -220,13 +222,27 @@ def make_renderer(
                         # ordinary prose — a year span like "(1990-2023)" or a
                         # value range. Not a citation, and not worth a warning.
                         return []
-                    if hi - lo > MAX_RANGE_SPAN:
+                    if hi - lo > MAX_RANGE_SPAN and not bracketed:
+                        # A wide *superscript* range is a dropped digit: the
+                        # notation is exactly where a leading digit goes missing
+                        # when formatting is lost, and expanding it would
+                        # manufacture citations the author never made.
                         if warnings is not None:
                             warnings.append(
                                 f"range '{lo}-{hi}' spans {hi - lo + 1} references — "
                                 "likely a dropped digit in the manuscript; left unchanged"
                             )
                         return []
+                    if hi - lo > MAX_RANGE_SPAN and warnings is not None:
+                        # Brackets are typed deliberately, and a systematic
+                        # review really does cite its included studies this way:
+                        # "included in both syntheses [14-49]". Taken as written,
+                        # but reported, because it is a lot of citations to make
+                        # from one marker.
+                        warnings.append(
+                            f"range '{lo}-{hi}' expands to {hi - lo + 1} references — "
+                            "bracketed, so taken as written; check it is not a typo"
+                        )
                     out += range(lo, hi + 1)
             elif chunk.isdigit():
                 out.append(int(chunk))
@@ -249,8 +265,8 @@ def make_renderer(
         )
         return f"{who}, ({c.year or 'n.d.'})"
 
-    def render(spec: str) -> str | None:
-        nums = expand(spec)
+    def render(spec: str, bracketed: bool = False) -> str | None:
+        nums = expand(spec, bracketed)
         if not nums:
             return None
         parts = []
@@ -270,14 +286,14 @@ def make_renderer(
                 parts.append(f"{{NEEDS REVIEW: ref {n}}}")
         return "".join(parts)
 
-    def render_fields(spec: str):
+    def render_fields(spec: str, bracketed: bool = False):
         """One citation becomes one field however many references it carries.
 
         That is how Zotero models "6,7" — a single citation of two items.
         Anything unresolved stays visible text between the fields rather than
         being folded into one, so a half-resolved group cannot look resolved.
         """
-        nums = expand(spec)
+        nums = expand(spec, bracketed)
         if not nums:
             return None
         pieces: list[dict] = []
@@ -485,8 +501,8 @@ def mark_body_fields(doc, biblio_idx: int, render) -> int:
             continue
         text = p.text
         replacements = []
-        for s, e, spec in _citation_spans(p):
-            pieces = render(spec)
+        for s, e, spec, bracketed in _citation_spans(p):
+            pieces = render(spec, bracketed)
             if pieces == []:
                 # every reference in this citation was deleted at review
                 replacements.append((*deletion_span(text, s, e), []))
@@ -587,30 +603,33 @@ def _detached_spans(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
-def _citation_spans(p) -> list[tuple[int, int, str]]:
-    """Locate every citation marker in a paragraph as (start, end, number_spec).
+def _citation_spans(p) -> list[tuple[int, int, str, bool]]:
+    """Locate every citation marker as (start, end, number_spec, bracketed).
 
     Works in paragraph-text coordinates rather than per-run, because Word freely
     splits a single citation across runs — "statement;²" + "⁰" is one citation,
-    and no per-run scan can see it. Three notations are recognised:
+    and no per-run scan can see it. Four notations are recognised:
 
       * bracketed groups          [1]  (2,3)  [4-6]
       * Unicode superscript chars ²³  ⁴²⁻⁴⁸
       * Word superscript runs     digits carrying superscript formatting
       * plain digits              fused to punctuation, or space-separated
+
+    `bracketed` travels with the span because it decides how much to trust a
+    wide range: see the note on MAX_RANGE_SPAN in make_renderer.
     """
     text = p.text
-    found: list[tuple[int, int, str]] = []
+    found: list[tuple[int, int, str, bool]] = []
 
     for m in GROUP.finditer(text):
-        found.append((m.start(), m.end(), m.group(1)))
+        found.append((m.start(), m.end(), m.group(1), True))
     for m in SUPRUN.finditer(text):
         if _is_math_superscript(text, m.start(), m.end()):
             continue
-        found.append((m.start(), m.end(), m.group(0).translate(SUP)))
+        found.append((m.start(), m.end(), m.group(0).translate(SUP), False))
     for m in PLAIN_ATTACHED.finditer(text):
-        found.append((m.start(1), m.end(1), m.group(1)))
-    found += _detached_spans(text)
+        found.append((m.start(1), m.end(1), m.group(1), False))
+    found += [(s, e, spec, False) for s, e, spec in _detached_spans(text)]
 
     # Contiguous Word-superscript formatting, merged across run boundaries.
     runs = p.runs
@@ -620,19 +639,19 @@ def _citation_spans(p) -> list[tuple[int, int, str]]:
         if is_sup and start is None:
             start = s
         elif not is_sup and start is not None:
-            found.append((start, s, text[start:s]))
+            found.append((start, s, text[start:s], False))
             start = None
     if start is not None:
-        found.append((start, len(text), text[start:]))
+        found.append((start, len(text), text[start:], False))
 
     # Drop overlaps, preferring the earliest and longest match.
     found.sort(key=lambda t: (t[0], -(t[1] - t[0])))
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, int, str, bool]] = []
     last_end = -1
-    for s, e, spec in found:
+    for s, e, spec, bracketed in found:
         if s < last_end or not re.search(r"\d", spec):
             continue
-        out.append((s, e, spec))
+        out.append((s, e, spec, bracketed))
         last_end = e
     return out
 
@@ -686,8 +705,8 @@ def mark_body(doc, biblio_idx: int, render) -> int:
             continue
         text = p.text
         replacements = []
-        for s, e, spec in _citation_spans(p):
-            rep = render(spec)
+        for s, e, spec, bracketed in _citation_spans(p):
+            rep = render(spec, bracketed)
             if rep == "":
                 # every reference in this citation was deleted at review
                 replacements.append((*deletion_span(text, s, e), ""))

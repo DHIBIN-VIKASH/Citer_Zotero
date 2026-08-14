@@ -175,7 +175,17 @@ def main() -> int:
     if not render("1,2"):
         failures.append("  a real citation list stopped rendering")
 
-    total = 16
+    # 7. A wide range means different things in different notations. Superscript
+    #    is where a leading digit goes missing, so "3-32" there is a typo; in
+    #    brackets it is a systematic review citing its included studies.
+    if render("1-2", False) is None:
+        failures.append("  a narrow range stopped rendering")
+    if render("1-30", False) is not None:
+        failures.append("  a wide superscript range was expanded")
+    if render("1-30", True) is None:
+        failures.append("  a wide bracketed range was refused")
+
+    total = 19
     if failures:
         print(f"FAIL  fields: {len(failures)} problems")
         print("\n".join(failures))
