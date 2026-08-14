@@ -43,6 +43,13 @@ CASES = [
      "Eur Spine J", "28", "4", "e10", "e18"),
     ("Park S. A paper. J Test. 2004;S2:11-44.",
      "J Test", "S2", None, "11", "44"),
+    # lettered volumes, as the Bone & Joint Journal numbers them. Crossref
+    # stores the suffix too ("100-B"), so it stays part of the volume.
+    ("Findlay C, Ayis S, Demetriades AK. Total disc replacement versus anterior cervical "
+     "discectomy and fusion. Bone Joint J. 2018;100-B(8):991-1001.",
+     "Bone Joint J", "100-B", "8", "991", "1001"),
+    ("Hou Y, Nie L, Pan X. Effectiveness and safety of Mobi-C. Bone Joint J. 2016;98-B(6):829-833.",
+     "Bone Joint J", "98-B", "6", "829", "833"),
 ]
 
 

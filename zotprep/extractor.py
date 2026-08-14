@@ -41,13 +41,16 @@ YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 #
 #   "2011;63 Suppl 11:S240-52"   a supplement, with a space inside the volume
 #   "2016;10(9):UC05-7"          a first page with two letters, not one
+#   "2018;100-B(8):991-1001"     a lettered volume, as the Bone & Joint
+#                                Journal numbers them — and Crossref stores it
+#                                that way too, so the suffix is kept
 #
 # The supplement is captured so it cannot be mistaken for part of the volume,
 # and then dropped: indexes store the base volume ("63"), which is what the
 # volume comparison needs to see.
 LOCATOR_RE = re.compile(
     r"\b(?P<year>(?:19|20)\d{2})\s*;\s*"
-    r"(?P<vol>[A-Za-z]?[\dA-Za-z]{0,8}?)"
+    r"(?P<vol>[A-Za-z]?[\dA-Za-z]{0,8}?(?:-[A-Za-z]{1,2})?)"
     r"(?:\s*(?P<suppl>[Ss]uppl(?:ement)?\.?\s*[\dA-Za-z]{0,4}))?\s*"
     r"(?:\(\s*(?P<issue>[^)]{1,20})\s*\))?\s*"
     r":\s*(?P<fp>[A-Za-z]{0,3}\d+)(?:\s*-\s*(?P<lp>[A-Za-z]{0,3}\d+))?"
