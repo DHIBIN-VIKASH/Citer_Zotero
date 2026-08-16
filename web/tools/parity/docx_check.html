@@ -150,9 +150,28 @@ try {
   const fdoc = await docx.Document.load(buf);
   const fidx = docx.findBiblioIndex(fdoc);
   const fend = docx.biblioEndIndex(fdoc, fidx);
+  // Same item stubs as docx_fixture.py, so the embedded CSL records are
+  // compared byte for byte along with everything else.
+  const stubItems = new Map();
+  for (const n of keys.keys()) {
+    stubItems.set(n, {
+      itemType: 'journalArticle',
+      title: `Reference number ${n}`,
+      date: String(1990 + n),
+      publicationTitle: `Journal ${n}`,
+      volume: String(n),
+      pages: `${n}00-${n}10`,
+      DOI: `10.1000/ref${n}`,
+      creators: [{ creatorType: 'author', firstName: 'A', lastName: `Surname${n}` }],
+    });
+  }
   let seq = 0;
   const frender = docx.makeRenderer(resolutions, keys, '1234567', {
-    style: 'fields', refs: null, warnings: [], newId: () => `ID${String(++seq).padStart(6, '0')}`,
+    style: 'fields',
+    refs: null,
+    warnings: [],
+    newId: () => `ID${String(++seq).padStart(6, '0')}`,
+    items: stubItems,
   });
   const nFields = docx.markBodyFields(fdoc, fidx, frender);
   docx.removeRange(fdoc, fidx, fend);

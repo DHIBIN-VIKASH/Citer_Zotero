@@ -173,8 +173,12 @@ async def run(args) -> int:
     print(f"Zotero items ready: {len(keys)} ({'dry run' if args.dry_run else 'created/reused'})")
 
     warnings: list[str] = []
+    # The item records travel with the renderer so each field can embed the
+    # reference itself, not just a link into this library — a document whose
+    # citations only resolve on the machine that made them is not much use to a
+    # co-author.
     render = make_renderer(results, keys, args.zotero_userid or "0", refs=refs,
-                           warnings=warnings, style=args.style)
+                           warnings=warnings, style=args.style, items=dict(items))
     if args.style == "fields":
         n_marked = mark_body_fields(doc, biblio_idx, render)
     else:

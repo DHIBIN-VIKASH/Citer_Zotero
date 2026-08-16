@@ -187,6 +187,7 @@ def make_renderer(
     refs: dict | None = None,
     warnings: list[str] | None = None,
     new_id=None,
+    items: dict | None = None,
 ):
     """Return render(spec) -> replacement for a citation group like '1,3-5'.
 
@@ -297,24 +298,25 @@ def make_renderer(
         if not nums:
             return None
         pieces: list[dict] = []
-        items: list[dict] = []
+        cited: list[dict] = []
 
         def flush() -> None:
-            if not items:
+            if not cited:
                 return
             pieces.append({
                 "kind": "field",
-                "json": citation_json(items, uid, make_id()),
-                "label": "; ".join(i["label"] for i in items),
+                "json": citation_json(cited, uid, make_id()),
+                "label": "; ".join(i["label"] for i in cited),
             })
-            items.clear()
+            cited.clear()
 
         for n in nums:
             res = resolutions[n]
             if res.status == "DROPPED":
                 continue
             if res.status in ("ACCEPTED", "FROM_TEXT") and keys.get(n):
-                items.append({"key": keys[n], "label": label(n)})
+                cited.append({"key": keys[n], "label": label(n),
+                              "item": (items or {}).get(n)})
             else:
                 flush()
                 pieces.append({"kind": "text", "value": f"{{NEEDS REVIEW: ref {n}}}"})
@@ -353,19 +355,77 @@ def random_citation_id(rng: random.Random | None = None) -> str:
     return "".join(r.choice(ID_ALPHABET) for _ in range(8))
 
 
+CSL_TYPE = {"journalArticle": "article-journal", "book": "book", "bookSection": "chapter"}
+
+
+def csl_item_data(item: dict, key: str) -> dict:
+    """A Zotero item dict as CSL-JSON, for embedding in the field.
+
+    This is what makes the document portable. A citation carries a `uris` entry
+    pointing into the library it came from; on any other machine that URI
+    resolves to nothing, and Zotero asks the reader to pick a substitute item —
+    which is what a co-author sees if the field says nothing else. Zotero's own
+    plugin therefore embeds the whole record alongside the URI, and so does this.
+    """
+    data: dict = {
+        "id": key,
+        "type": CSL_TYPE.get(item.get("itemType", ""), "article-journal"),
+        "title": item.get("title") or "",
+    }
+    container = item.get("publicationTitle") or item.get("bookTitle")
+    if container:
+        data["container-title"] = container
+    if item.get("journalAbbreviation"):
+        data["journalAbbreviation"] = item["journalAbbreviation"]
+    for src, dst in (("volume", "volume"), ("issue", "issue"), ("pages", "page"),
+                     ("DOI", "DOI"), ("edition", "edition"), ("publisher", "publisher"),
+                     ("place", "publisher-place")):
+        if item.get(src):
+            data[dst] = item[src]
+
+    authors = []
+    for c in item.get("creators") or []:
+        if c.get("name"):
+            authors.append({"literal": c["name"]})
+        elif c.get("lastName"):
+            entry = {"family": c["lastName"]}
+            if c.get("firstName"):
+                entry["given"] = c["firstName"]
+            authors.append(entry)
+    if authors:
+        data["author"] = authors
+
+    # Only ever a year here, which is a legal date-parts of length one.
+    year = str(item.get("date") or "").strip()
+    if year:
+        data["issued"] = {"date-parts": [[year]]}
+    return data
+
+
 def citation_json(items: list[dict], uid: str, cid: str) -> str:
     """The CSL_CITATION payload for one citation, which may carry several items.
 
     Serialised without spaces after the separators, matching what Zotero writes.
     """
     shown = "; ".join(i["label"] for i in items)
+    cited = []
+    for i in items:
+        entry: dict = {
+            "id": i["key"],
+            "uris": [f"http://zotero.org/users/{uid}/items/{i['key']}"],
+        }
+        if i.get("item"):
+            entry["itemData"] = csl_item_data(i["item"], i["key"])
+        cited.append(entry)
     return json.dumps(
         {
             "citationID": cid,
-            "properties": {"formattedCitation": shown, "plainCitation": shown},
-            "citationItems": [
-                {"uris": [f"http://zotero.org/users/{uid}/items/{i['key']}"]} for i in items
-            ],
+            "properties": {
+                "formattedCitation": shown,
+                "plainCitation": shown,
+                "noteIndex": 0,
+            },
+            "citationItems": cited,
             "schema": CSL_SCHEMA,
         },
         separators=(",", ":"),

@@ -197,8 +197,12 @@ export async function finish(state, opts, cb = {}) {
     const doc = await Document.load(buffer);
     const biblioIdx = usedPastedBibliography ? doc.paragraphs.length : findBiblioIndex(doc);
     // Only one pass may collect warnings, or every one is reported twice.
+    // The item records travel with the renderer so each field can embed the
+    // reference itself, not just a link into this library — a document whose
+    // citations only resolve on the machine that made them is not much use to a
+    // co-author.
     const render = makeRenderer(results, keys, userid || '0',
-      { refs, warnings: style === 'fields' ? warnings : null, style });
+      { refs, warnings: style === 'fields' ? warnings : null, style, items: new Map(items) });
     const n = style === 'fields'
       ? markBodyFields(doc, biblioIdx, render)
       : markBody(doc, biblioIdx, render);

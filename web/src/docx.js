@@ -368,7 +368,7 @@ function titleCase(s) {
  * and the document text is left untouched.
  */
 export function makeRenderer(resolutions, keys, uid, {
-  style = 'scannable', refs = null, warnings = null, newId = randomCitationId,
+  style = 'scannable', refs = null, warnings = null, newId = randomCitationId, items = null,
 } = {}) {
   function expand(spec, bracketed = false) {
     const out = [];
@@ -472,21 +472,21 @@ export function makeRenderer(resolutions, keys, uid, {
     const nums = expand(spec, bracketed);
     if (!nums.length) return null;
     const pieces = [];
-    let items = [];
+    let cited = [];
     const flush = () => {
-      if (!items.length) return;
+      if (!cited.length) return;
       pieces.push({
         kind: 'field',
-        json: citationJson(items, uid, newId()),
-        label: items.map((i) => i.label).join('; '),
+        json: citationJson(cited, uid, newId()),
+        label: cited.map((i) => i.label).join('; '),
       });
-      items = [];
+      cited = [];
     };
     for (const n of nums) {
       const res = resolutions.get(n);
       if (res.status === 'DROPPED') continue;
       if (['ACCEPTED', 'FROM_TEXT'].includes(res.status) && keys.get(n)) {
-        items.push({ key: keys.get(n), label: label(n) });
+        cited.push({ key: keys.get(n), label: label(n), item: items ? items.get(n) : null });
       } else {
         flush();
         pieces.push({ kind: 'text', value: `{NEEDS REVIEW: ref ${n}}` });
@@ -524,6 +524,49 @@ export function randomCitationId(rng = Math.random) {
   return out;
 }
 
+const CSL_TYPE = { journalArticle: 'article-journal', book: 'book', bookSection: 'chapter' };
+
+/**
+ * A Zotero item as CSL-JSON, for embedding in the field.
+ *
+ * This is what makes the document portable. A citation carries a `uris` entry
+ * pointing into the library it came from; on any other machine that URI resolves
+ * to nothing, and Zotero asks the reader to pick a substitute item — which is
+ * what a co-author sees if the field says nothing else. Zotero's own plugin
+ * therefore embeds the whole record alongside the URI, and so does this.
+ */
+export function cslItemData(item, key) {
+  const data = {
+    id: key,
+    type: CSL_TYPE[item.itemType] || 'article-journal',
+    title: item.title || '',
+  };
+  const container = item.publicationTitle || item.bookTitle;
+  if (container) data['container-title'] = container;
+  if (item.journalAbbreviation) data.journalAbbreviation = item.journalAbbreviation;
+  for (const [src, dst] of [['volume', 'volume'], ['issue', 'issue'], ['pages', 'page'],
+    ['DOI', 'DOI'], ['edition', 'edition'], ['publisher', 'publisher'],
+    ['place', 'publisher-place']]) {
+    if (item[src]) data[dst] = item[src];
+  }
+
+  const authors = [];
+  for (const c of item.creators || []) {
+    if (c.name) authors.push({ literal: c.name });
+    else if (c.lastName) {
+      const entry = { family: c.lastName };
+      if (c.firstName) entry.given = c.firstName;
+      authors.push(entry);
+    }
+  }
+  if (authors.length) data.author = authors;
+
+  // Only ever a year here, which is a legal date-parts of length one.
+  const year = String(item.date || '').trim();
+  if (year) data.issued = { 'date-parts': [[year]] };
+  return data;
+}
+
 /**
  * The CSL_CITATION payload for one citation, which may carry several items —
  * "6,7" is a single citation of two references, not two citations.
@@ -532,8 +575,12 @@ export function citationJson(items, uid, id) {
   const shown = items.map((i) => i.label).join('; ');
   return JSON.stringify({
     citationID: id,
-    properties: { formattedCitation: shown, plainCitation: shown },
-    citationItems: items.map((i) => ({ uris: [`http://zotero.org/users/${uid}/items/${i.key}`] })),
+    properties: { formattedCitation: shown, plainCitation: shown, noteIndex: 0 },
+    citationItems: items.map((i) => {
+      const entry = { id: i.key, uris: [`http://zotero.org/users/${uid}/items/${i.key}`] };
+      if (i.item) entry.itemData = cslItemData(i.item, i.key);
+      return entry;
+    }),
     schema: CSL_SCHEMA,
   });
 }

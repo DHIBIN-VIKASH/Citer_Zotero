@@ -64,12 +64,28 @@ def build_doc(sentences):
     return doc
 
 
-def render_for(doc, resolutions, keys, biblio_idx):
+ITEMS = {
+    1: {
+        "itemType": "journalArticle", "title": "A first paper", "date": "2020",
+        "publicationTitle": "Journal of Testing", "journalAbbreviation": "J Test",
+        "volume": "12", "issue": "3", "pages": "45-50", "DOI": "10.1000/first",
+        "creators": [{"creatorType": "author", "firstName": "Jane", "lastName": "Smith"},
+                     {"creatorType": "author", "name": "A Study Group"}],
+    },
+    2: {
+        "itemType": "book", "title": "A second paper", "date": "2021",
+        "publisher": "North-Holland", "place": "Amsterdam",
+        "creators": [{"creatorType": "author", "firstName": "Ann", "lastName": "Jones"}],
+    },
+}
+
+
+def render_for(doc, resolutions, keys, biblio_idx, items=ITEMS):
     ids = iter(f"ID{n:06d}" for n in range(1, 999))
     render = make_renderer(
         resolutions, keys, "1234567", style="fields",
         refs={n: Ref(["Smith"]) for n in resolutions},
-        new_id=lambda: next(ids),
+        new_id=lambda: next(ids), items=items,
     )
     return mark_body_fields(doc, biblio_idx, render)
 
@@ -185,7 +201,36 @@ def main() -> int:
     if render("1-30", True) is None:
         failures.append("  a wide bracketed range was refused")
 
-    total = 19
+    # 8. The document has to work on someone else's machine. A field that names
+    #    only a URI into the library that made it leaves a co-author staring at
+    #    "this citation no longer exists in your Zotero database" — so the whole
+    #    reference travels inside the field, as Zotero's own plugin writes it.
+    import json
+
+    payloads = [json.loads(i.replace("&quot;", '"').replace("&amp;", "&")) for i in instrs]
+    for j in payloads:
+        for ci in j["citationItems"]:
+            if "itemData" not in ci:
+                failures.append("  a citation item carries no itemData — not portable")
+            if "id" not in ci:
+                failures.append("  a citation item carries no id")
+    first = payloads[0]["citationItems"][0]["itemData"]
+    for field, want in (("type", "article-journal"), ("title", "A first paper"),
+                        ("container-title", "Journal of Testing"), ("volume", "12"),
+                        ("issue", "3"), ("page", "45-50"), ("DOI", "10.1000/first")):
+        if first.get(field) != want:
+            failures.append(f"  itemData {field}: want {want!r}, got {first.get(field)!r}")
+    if first.get("issued") != {"date-parts": [["2020"]]}:
+        failures.append(f"  itemData issued wrong: {first.get('issued')!r}")
+    if first.get("author") != [{"family": "Smith", "given": "Jane"}, {"literal": "A Study Group"}]:
+        failures.append(f"  itemData author wrong: {first.get('author')!r}")
+    # a book keeps the fields a journal article does not have
+    book = next((ci["itemData"] for j in payloads for ci in j["citationItems"]
+                 if ci["itemData"]["title"] == "A second paper"), None)
+    if not book or book.get("type") != "book" or book.get("publisher") != "North-Holland":
+        failures.append(f"  book itemData wrong: {book!r}")
+
+    total = 27
     if failures:
         print(f"FAIL  fields: {len(failures)} problems")
         print("\n".join(failures))

@@ -232,9 +232,25 @@ def main() -> int:
     fdoc = Document(path)
     fidx = find_biblio_index(fdoc)
     fend = biblio_end_index(fdoc, fidx)
+    # Item records, so the fields carry the reference itself and not just a URI
+    # into one library — the difference between a document a co-author can open
+    # and one that asks them to find every citation by hand.
+    stub_items = {
+        n: {
+            "itemType": "journalArticle",
+            "title": f"Reference number {n}",
+            "date": str(1990 + n),
+            "publicationTitle": f"Journal {n}",
+            "volume": str(n),
+            "pages": f"{n}00-{n}10",
+            "DOI": f"10.1000/ref{n}",
+            "creators": [{"creatorType": "author", "firstName": "A", "lastName": f"Surname{n}"}],
+        }
+        for n in keys
+    }
     ids = iter(f"ID{n:06d}" for n in range(1, 999))
     frender = make_renderer(resolutions, keys, "1234567", style="fields", refs=None,
-                            warnings=[], new_id=lambda: next(ids))
+                            warnings=[], new_id=lambda: next(ids), items=stub_items)
     n_fields = mark_body_fields(fdoc, fidx, frender)
     remove_range(fdoc, fidx, fend)
 
